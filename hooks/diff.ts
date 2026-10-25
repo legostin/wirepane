@@ -8,6 +8,8 @@ export type Exchange = { detail: FlowDetail; reqText: string | null; resText: st
 // headers that differ between any two requests and say nothing
 const NOISE = new Set(['date', 'age', 'x-wirepane-replay'])
 const MAX_LINES = 60
+// Between repeated query values. Built at runtime: a NUL written in a hook string is a control character.
+const QUERY_SEP = String.fromCharCode(0)
 
 function show(value: unknown): string {
   if (value === undefined) return '(absent)'
@@ -87,7 +89,7 @@ export function diffRequests(a: Exchange, b: Exchange): string[] {
   for (const key of keys) {
     const x = ua.searchParams.getAll(key)
     const y = ub.searchParams.getAll(key)
-    if (x.join('\u0000') === y.join('\u0000')) continue
+    if (x.join(QUERY_SEP) === y.join(QUERY_SEP)) continue
     if (y.length === 0) out.push(`query ${key}: only in ${ids[0]} (${show(x.join(','))})`)
     else if (x.length === 0) out.push(`query ${key}: only in ${ids[1]} (${show(y.join(','))})`)
     else out.push(`query ${key}: ${show(x.join(','))} → ${show(y.join(','))}`)

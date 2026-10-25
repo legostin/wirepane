@@ -237,6 +237,13 @@ describe('rules', () => {
     assert.equal(miss.body, '{"user":"bob"}')
   })
 
+  test('a merge keeps a 64-bit id in the body digit for digit', async () => {
+    await useRules([{ id: 'note', match: { path: '/big' }, request: [{ type: 'mergeJson', json: { note: 'x' } }] }])
+    const body = '{"id":1852345678901234701,"total":649.5,"ids":[9007199254740993]}'
+    const hit = JSON.parse((await curl(['-x', proxy, '-H', 'content-type: application/json', '-d', body, echoUrl('/big')])).stdout)
+    assert.equal(hit.body, '{"id":1852345678901234701,"total":649.5,"ids":[9007199254740993],"note":"x"}')
+  })
+
   test('applies rules in order, and stop ends the chain', async () => {
     const twoRules = stop => [
       { id: 'first', stop, request: [{ type: 'setHeader', name: 'X-Order', value: 'first' }] },

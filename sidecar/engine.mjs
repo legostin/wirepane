@@ -11,6 +11,7 @@ import { Transform } from 'node:stream'
 import vm from 'node:vm'
 import zlib from 'node:zlib'
 
+import { parseExact, stringifyExact } from '../shared/exactjson.mjs'
 import {
   describeAction,
   describeStep,
@@ -305,12 +306,12 @@ export async function applyRequestRules(rules, state, { projectRoot, signal, log
         case 'mergeJson': {
           let parsed
           try {
-            parsed = JSON.parse((state.body ?? Buffer.alloc(0)).toString('utf8') || '{}')
+            parsed = parseExact((state.body ?? Buffer.alloc(0)).toString('utf8') || '{}')
           } catch {
             note('the body is not JSON: merge skipped')
             break
           }
-          state.body = Buffer.from(JSON.stringify(deepMerge(parsed, action.json)))
+          state.body = Buffer.from(stringifyExact(deepMerge(parsed, action.json)))
           note()
           break
         }
@@ -424,12 +425,12 @@ export async function applyResponseRules(rules, state, { projectRoot, signal, lo
         case 'mergeJson': {
           let parsed
           try {
-            parsed = JSON.parse((state.body ?? Buffer.alloc(0)).toString('utf8') || '{}')
+            parsed = parseExact((state.body ?? Buffer.alloc(0)).toString('utf8') || '{}')
           } catch {
             note('the body is not JSON: merge skipped')
             break
           }
-          state.body = Buffer.from(JSON.stringify(deepMerge(parsed, action.json)))
+          state.body = Buffer.from(stringifyExact(deepMerge(parsed, action.json)))
           note()
           break
         }
@@ -551,7 +552,7 @@ export async function applyMessageRules(rules, message, ctx) {
         case 'mergeJson': {
           const text = textOf(message)
           try {
-            message.data = Buffer.from(JSON.stringify(deepMerge(JSON.parse(text ?? ''), step.json)))
+            message.data = Buffer.from(stringifyExact(deepMerge(parseExact(text ?? ''), step.json)))
             note()
           } catch {
             note('not JSON: merge skipped')

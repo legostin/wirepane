@@ -4,6 +4,10 @@ import {
   clip,
   filterFlows,
   type FlowDetail,
+  fitUrl,
+  parseExact,
+  prettyBody,
+  stringifyExact,
   flowTable,
   flowUrl,
   grpcLabel,
@@ -104,6 +108,7 @@ describe('the filter language', () => {
     expect(ids('type:img')).toEqual([3])
     expect(ids('type:image,html')).toEqual([3, 4])
     expect(ids('path:/v1')).toEqual([1, 2])
+    expect(ids('path:/v1/*s/1')).toEqual([1])
   })
 
   test('is: names states, and - negates any term', () => {
@@ -134,6 +139,27 @@ describe('formats', () => {
     expect(flowUrl(flow(1, { scheme: 'http', port: 8080 }))).toBe('http://api.example.com:8080/v1/items/1')
     expect(flowUrl(FLOWS[5]!)).toBe('gateway.icloud.com:443')
     expect(flowUrl(FLOWS[7]!)).toBe('wss://api.example.com/socket')
+  })
+
+  test('a URL too long for its row keeps its host and its end', () => {
+    const url = 'https://legost.in/en/search/suggest?q=ruby'
+    expect(fitUrl(url, 60)).toBe(url)
+    expect(fitUrl(url, 34)).toBe('legost.in/en/search/suggest?q=ruby')
+    expect(fitUrl(url, 30)).toBe('legost.in/…/suggest?q=ruby')
+    expect(fitUrl(url, 22)).toBe('legost.in/…gest?q=ruby')
+    expect(fitUrl('http://api.example.com:8080/v1/items/1', 30)).toBe('api.example.com:8080/…/items/1')
+    expect(fitUrl('http://localhost:4100/api/orders/1852345678901234700', 26)).toBe('localhost:4100/…8901234700')
+    expect(fitUrl('wss://api.example.com/socket/very/long/path', 30)).toBe('wss://api.example.com/…/path')
+    expect(fitUrl('gateway.icloud.com:443', 12)).toBe('gateway.icl…')
+  })
+
+  test('a 64-bit integer keeps every digit when a body is printed again', () => {
+    const body = '{"orders":[{"id":1852345678901234701,"total":649.5,"note":"id 1852345678901234701, \\"quoted\\""}],"n":-9007199254740993}'
+    const pretty = prettyBody(body, 'application/json')
+    expect(pretty).toContain('"id": 1852345678901234701,')
+    expect(pretty).toContain('"total": 649.5')
+    expect(pretty).toContain('"n": -9007199254740993')
+    expect(stringifyExact(parseExact(body))).toBe(body)
   })
 
   test('status labels say CERT, ERR and pending', () => {

@@ -71,6 +71,7 @@ describe('what the model is shown', () => {
     expect(compact.text.startsWith('{"items":[{"id":1')).toBe(true)
     expect(compact.isCut).toBe(true)
     expect(bodyForModel('plain words', 'text/plain', 5)).toEqual({ text: 'plain', isCut: true })
+    expect(bodyForModel('{"id":1852345678901234701}', 'application/json', 1000).text).toBe('{\n  "id": 1852345678901234701\n}')
   })
 
   test('a JSON path picks one part of a body', () => {

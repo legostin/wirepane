@@ -35,6 +35,9 @@ import {
   type FlowBody,
   type FlowDetail,
   filterFlows,
+  fitUrl,
+  parseExact,
+  stringifyExact,
   flattenTree,
   flowTable,
   flowUrl,
@@ -378,6 +381,10 @@ async function startProxy($: EngineInterface, options: Options): Promise<void> {
               ca: event.ca,
               error: null,
             }))
+            // what is held is the running proxy's: an exchange held by a run that ended is gone,
+            // and one held while this session was away is there to be let go
+            const held = await control($, 'held/list', {})
+            if (!held.error) await update($, heldAtom, () => held.held ?? [])
             await showStatus($)
           } else if (event.t === 'rules') {
             // the file changed on disk (an edit, a git checkout): read it again
@@ -1526,7 +1533,7 @@ async function drawList($: EngineInterface, e: PaneEvent, options: Options): Pro
           })
         : shown.slice(0, MAX_ROWS).map(flow => (
             <Box key={`row-${flow.id}`} flexDirection="row">
-              {flowCells(flow, flowUrl(flow), urlWidth)}
+              {flowCells(flow, fitUrl(flowUrl(flow), urlWidth - (flow.rules?.length ? 2 : 0)), urlWidth)}
             </Box>
           ))}
       {(isTree ? treeRows.length : shown.length) > MAX_ROWS ? (
@@ -2776,7 +2783,7 @@ const GET_TOOL = 'mcp__wirepane__get_request'
 const FILTER_HELP =
   'space-separated terms that must all hold, a leading "-" negates one: free text (substring of the URL), ' +
   'method:POST (or method:get,post), status:4xx | status:404 | status:>=400 | status:400-499, host:api.example.com | host:*.example.com, ' +
-  'path:/v1/login, type:json|html|xml|js|css|img|font|media|text|form|grpc|ws|tunnel|other, is:error|ok|pending|tunnel|ws|https|h2|grpc|held|rejected|modified, client:192.168.'
+  'path:/v1/login (or path:/orders/*/refund), type:json|html|xml|js|css|img|font|media|text|form|grpc|ws|tunnel|other, is:error|ok|pending|tunnel|ws|https|h2|grpc|held|rejected|modified, client:192.168.'
 
 const ACTION_TYPES = [
   'delay', 'throttle', 'setHeader', 'removeHeader', 'setQuery', 'removeQuery', 'mapRemote', 'replaceUrl',
@@ -2924,7 +2931,7 @@ async function phaseText($: EngineInterface): Promise<string> {
 }
 
 /** Shows the list or the tree, and remembers the choice for later sessions. */
-type ControlAnswer = { ok?: boolean; error?: string; open?: number[]; flows?: ProxyFlow[] }
+type ControlAnswer = { ok?: boolean; error?: string; open?: number[]; flows?: ProxyFlow[]; held?: ProxyHeld[] }
 
 // --- what the tools show Claude ---------------------------------------------------------
 
@@ -2988,12 +2995,12 @@ async function describeRequest($: EngineInterface, id: number, view: RequestView
     if (pathSide === title && loaded.text !== null) {
       let picked: ReturnType<typeof jsonPath>
       try {
-        picked = jsonPath(JSON.parse(loaded.text), view.jsonPath!)
+        picked = jsonPath(parseExact(loaded.text), view.jsonPath!)
       } catch {
         picked = { error: 'the body is not JSON' }
       }
       if ('error' in picked) return void out.push(`--- ${title} body at ${view.jsonPath}: ${picked.error} ---`)
-      const shown = bodyForModel(JSON.stringify(picked.value), 'application/json', view.budget)
+      const shown = bodyForModel(stringifyExact(picked.value), 'application/json', view.budget)
       out.push(`--- ${title} body at ${view.jsonPath} ---`, shown.text)
       if (shown.isCut) out.push(`[cut at ${shown.text.length} characters; a deeper json_path, or max_chars, shows more]`)
       return

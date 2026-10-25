@@ -382,8 +382,11 @@ function waitForFlows(after, until, ms) {
       resolve(found)
     }
     const waiter = flow => {
-      if (flow.id <= after || found.some(f => f.id === flow.id)) return
+      if (flow.id <= after) return
       if (until === 'end' && flow.state !== 'done' && flow.state !== 'error') return
+      // one found already: the answer carries its newest state (held at a breakpoint, say)
+      const at = found.findIndex(f => f.id === flow.id)
+      if (at >= 0) return void (found[at] = { ...flow })
       found.push({ ...flow })
       // a moment for others that end together, never past the deadline, at most 50
       if (found.length >= 50) return done()

@@ -2,7 +2,7 @@ import type { On } from 'claude-code'
 import type { MockClock } from 'claude-code/testing'
 import { expect, mock, test } from 'claude-code/testing'
 
-import type { ProxyFlow } from '../types'
+import type { ProxyFlow, ProxyHeld } from '../types'
 
 const HOME = '/home/tester'
 const RUN_DIR = `${HOME}/.claude/proxy-mod/flows/session`
@@ -59,6 +59,8 @@ let waitFlows: ProxyFlow[] = []
 let withOtherSession = false
 // a request held at a breakpoint
 let withHeld = false
+// what the proxy says is held when a session connects (held/list)
+let heldOnConnect: ProxyHeld[] = []
 // streams: a WebSocket, a gRPC call and server-sent events join the flows the fake sidecar sends
 let withStreams = false
 const STREAM_FLOWS = [
@@ -201,6 +203,7 @@ function fakeMachine(on: On, clock: MockClock, extraFiles: Record<string, string
     }
     if (line === 'adb devices') return ok('List of devices attached\nemulator-5554\tdevice\n')
     if (e.argv[0] === 'curl' && line.includes('/__wirepane/tok3n/flows/wait')) return ok(JSON.stringify({ flows: waitFlows }))
+    if (e.argv[0] === 'curl' && line.includes('/__wirepane/tok3n/held/list')) return ok(JSON.stringify({ held: heldOnConnect }))
     if (e.argv[0] === 'curl' && line.includes('/__wirepane/tok3n/held/resume')) {
       const body = JSON.parse(e.init?.stdin ?? '{}') as { id: number }
       return ok(body.id === 2 ? '{"ok":true}' : `{"error":"request #${body.id} is not held","held":[2]}`)
@@ -1083,6 +1086,23 @@ test('the doctor names what is in the way, the Health view fixes it, and a sessi
     await ui.unmount()
   } finally {
     withOtherSession = false
+  }
+})
+
+test('a request held while the session was away shows once it connects', SLOW, async ($, on) => {
+  heldOnConnect = [{ id: 2, phase: 'request', since: 0, view: { method: 'POST', url: 'https://api.example.com/v1/login', headers: [], body: '{"user":"tester"}' } }]
+  try {
+    const clock = mock.clock(on)
+    fakeMachine(on, clock)
+    const ui = await $.ui.mount({ plugin: 'wirepane', surface: 'terminal', ...PANE })
+    await ui.press({ key: 'toggle' })
+    await clock.advance(250)
+    expect((await ui.find({ key: 'held' }))?.text).toBe('⏸ 1 held')
+    await ui.press({ key: 'toggle' })
+    await clock.advance(200)
+    await ui.unmount()
+  } finally {
+    heldOnConnect = []
   }
 })
 

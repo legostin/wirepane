@@ -3,6 +3,7 @@
 // budget shared by the bodies, JSON compact when pretty would not fit.
 
 import type { ProxyFlow } from '../types'
+import { parseExact, stringifyExact } from './flows'
 
 export { modelUrl } from './flows'
 
@@ -32,10 +33,10 @@ function isJsonType(contentType: string | null, text: string): boolean {
 export function bodyForModel(text: string, contentType: string | null, budget: number): { text: string; isCut: boolean } {
   if (isJsonType(contentType, text)) {
     try {
-      const value: unknown = JSON.parse(text)
-      const pretty = JSON.stringify(value, null, 2)
+      const value: unknown = parseExact(text)
+      const pretty = stringifyExact(value, 2)
       if (pretty.length <= budget) return { text: pretty, isCut: false }
-      const compact = JSON.stringify(value)
+      const compact = stringifyExact(value)
       return compact.length <= budget ? { text: compact, isCut: false } : { text: compact.slice(0, budget), isCut: true }
     } catch {}
   }

@@ -102,6 +102,18 @@ describe('breakpoints', () => {
     assert.equal(flow.errorCode, 'rule')
   })
 
+  test('a wait for requests that start answers one held at its breakpoint as held', async () => {
+    const { nextId } = await control('flows/wait', { after: 0, until: 'start', timeoutMs: 1 })
+    const waiting = control('flows/wait', { after: nextId - 1, until: 'start', timeoutMs: 5000 })
+    await new Promise(resolve => setTimeout(resolve, 300)) // the wait is in place before the request starts
+    const out = curl(['-x', proxy, '-X', 'POST', '--data-binary', 'wait', `http://localhost:${port}/req-wait`])
+    const { flows } = await waiting
+    const flow = flows.find(f => f.path === '/req-wait')
+    assert.equal(flow?.held, 'request')
+    await control('held/resume', { id: flow.id, action: 'continue' })
+    assert.equal((await out).stdout, 'server saw POST /req-wait "wait"')
+  })
+
   test('a breakpoint nobody answers lets the request go after its time', async () => {
     const out = await curl(['-x', proxy, `http://localhost:${port}/brief`])
     assert.equal(out.stdout, 'server saw GET /brief ""')

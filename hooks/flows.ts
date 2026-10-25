@@ -1,6 +1,7 @@
 // Pure logic shared by the pane and the tools: the sidecar's line protocol,
 // the flow list, the filter language and the formats.
 
+import { parseExact, stringifyExact } from '../shared/exactjson.mjs'
 import type { ProxyAddress, ProxyCa, ProxyFlow, ProxyHeld, ProxySession } from '../types'
 
 export type SidecarEvent =
@@ -317,7 +318,13 @@ export function parseFilter(query: string): ParsedFilter {
       }
       case 'path': {
         const v = value.toLowerCase()
-        test = flow => flow.path.toLowerCase().includes(v)
+        if (v.includes('*')) {
+          // /orders/*/refund: * is any run, the rest found anywhere in the path, as without one
+          const re = new RegExp(v.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*'), 'i')
+          test = flow => re.test(flow.path)
+        } else {
+          test = flow => flow.path.toLowerCase().includes(v)
+        }
         break
       }
       case 'type': {
@@ -382,6 +389,25 @@ export function truncate(text: string, width: number): string {
   return text.length <= width ? text : `${text.slice(0, Math.max(0, width - 1))}…`
 }
 
+/**
+ * A URL in at most `width` characters for one row of the list. http(s)://
+ * goes first, then the middle of the path, so the host and the end (the last
+ * segment and the query, what tells two requests apart) stay.
+ */
+export function fitUrl(url: string, width: number): string {
+  if (url.length <= width) return url
+  const bare = url.replace(/^https?:\/\//, '')
+  if (bare.length <= width) return bare
+  const hostEnd = bare.indexOf('/', bare.includes('://') ? bare.indexOf('://') + 3 : 0)
+  const room = width - hostEnd - 2
+  if (hostEnd === -1 || room < 4) return truncate(bare, width)
+  let tail = bare.slice(-room)
+  const slash = tail.indexOf('/')
+  // start the end at a whole segment when that keeps most of it
+  if (slash > 0 && tail.length - slash >= room / 2) tail = tail.slice(slash)
+  return `${bare.slice(0, hostEnd)}/…${tail}`
+}
+
 /** The flow's URL in at most `max` characters: the end (the query first) cut, and how much was. */
 export function modelUrl(flow: Pick<ProxyFlow, 'scheme' | 'host' | 'port' | 'path' | 'kind'>, max = 160): string {
   const url = flowUrl(flow)
@@ -439,10 +465,13 @@ export function toCurl(detail: FlowDetail, body: string | null): string {
 }
 
 /** JSON pretty-printed when it parses; the text as it came otherwise. */
+// A body printed again keeps a 64-bit id's every digit (shared with the proxy's rules).
+export { parseExact, stringifyExact }
+
 export function prettyBody(text: string, contentType: string | null): string {
   if ((contentType ?? '').includes('json') || /^\s*[[{]/.test(text)) {
     try {
-      return JSON.stringify(JSON.parse(text), null, 2)
+      return stringifyExact(parseExact(text), 2)
     } catch {
       return text
     }

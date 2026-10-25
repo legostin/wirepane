@@ -1,7 +1,7 @@
 // Two captured requests side by side: what differs, one line each, in the
 // order a person checks (method and URL, query, headers, status, bodies).
 
-import type { FlowDetail } from './flows'
+import { type FlowDetail, parseExact, stringifyExact } from './flows'
 
 export type Exchange = { detail: FlowDetail; reqText: string | null; resText: string | null }
 
@@ -11,7 +11,7 @@ const MAX_LINES = 60
 
 function show(value: unknown): string {
   if (value === undefined) return '(absent)'
-  const text = JSON.stringify(value)
+  const text = stringifyExact(value)
   return text.length > 80 ? `${text.slice(0, 79)}…` : text
 }
 
@@ -53,7 +53,7 @@ function diffJson(where: string, path: string, a: unknown, b: unknown, out: stri
 function parse(text: string | null): { value: unknown } | null {
   if (text === null) return null
   try {
-    return { value: JSON.parse(text) }
+    return { value: parseExact(text) }
   } catch {
     return null
   }

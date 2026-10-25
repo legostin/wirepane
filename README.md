@@ -226,7 +226,7 @@ Terms separated by spaces must all hold; a leading `-` negates one. Free text ma
 | `method:POST`, `method:get,post` | the method |
 | `status:404`, `status:4xx`, `status:>=400`, `status:500-599` | the response status |
 | `host:api.example.com`, `host:*.example.com` | the host |
-| `path:/v1/login` | a substring of the path |
+| `path:/v1/login`, `path:/orders/*/refund` | a substring of the path; `*` stands for any run of characters |
 | `type:json\|html\|xml\|js\|css\|img\|font\|media\|text\|form\|grpc\|ws\|tunnel\|other` | the content type |
 | `is:error\|ok\|pending\|tunnel\|ws\|https\|h2\|grpc\|held\|rejected\|modified` | the state (`error` includes failed gRPC calls; `held`: waiting at a breakpoint) |
 | `client:192.168.1.20`, `rule:slow-feed` | the client, a rule |

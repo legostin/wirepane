@@ -10,6 +10,7 @@
   "homepage": "https://legostin.github.io/wirepane/",
   "repository": "https://github.com/legostin/wirepane",
   "license": "MIT",
+  "privacyPolicyUrl": "https://github.com/legostin/wirepane/blob/main/PRIVACY.md",
   "icon": "./assets/icon.png",
   "keywords": [
     "android",

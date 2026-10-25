@@ -16,7 +16,7 @@ So instead of copying requests into the chat, you ask:
 
 Claude finds the request, reads only the part it needs, compares the one that works with the one that fails, replays it with a change, writes a rule, and fixes your code. When something is in the way, a missing CA, a pinned certificate, a VPN or Charles holding the system proxy, the doctor names it and fixes it.
 
-[Website](https://legostin.github.io/wirepane/) · [Install](#install) · [What Claude can do](#tools-for-claude) · [Doctor](#the-doctor) · [Rules](#rules) · [Limits](#limits) · [Design notes](docs/design.md)
+[Website](https://legostin.github.io/wirepane/) · [Install](#install) · [What Claude can do](#tools-for-claude) · [Doctor](#the-doctor) · [Rules](#rules) · [Limits](#limits) · [Design notes](docs/design.md) · [Privacy](PRIVACY.md)
 
 ## Install
 
@@ -311,7 +311,7 @@ A mod runs sandboxed, with no sockets of its own, so the proxy is a small Node.j
 
 ## What it runs and what it changes
 
-Wirepane sends nothing of its own anywhere: no telemetry, no update checks. The proxy reads each request a client sends it (the URL, the headers and the body, which can include tokens and personal data from the app you are debugging) and forwards that request to the host in the URL. With an upstream proxy set, it sends the same request there instead, and that proxy connects onward. An upstream given as `pac+http(s)://…` is a PAC file: the proxy downloads it when a request first needs it, and again once its copy is ten minutes old, and runs its `FindProxyForURL` in a sandbox to pick the upstream for each request. Recordings stay on this Mac, in `~/.claude/proxy-mod`; a run's folder is deleted two days after its last use. A request reaches Claude only when Claude calls a tool; what it reads then becomes part of the conversation, like a file Claude reads.
+Wirepane sends nothing of its own anywhere: no telemetry, no update checks. The proxy reads each request a client sends it (the URL, the headers and the body, which can include tokens and personal data from the app you are debugging) and forwards that request to the host in the URL. With an upstream proxy set, it sends the same request there instead, and that proxy connects onward. A rule that sends a request to another address (`mapRemote`, `replaceUrl`), and a replay or a held request given another URL, send it there, headers and cookies included. An upstream given as `pac+http(s)://…` is a PAC file: the proxy downloads it when a request first needs it, and again once its copy is ten minutes old, and runs its `FindProxyForURL` in a sandbox to pick the upstream for each request. Recordings stay on this Mac, in `~/.claude/proxy-mod`; a proxy that starts deletes the run folders not changed for two days. A request reaches Claude only when Claude calls a tool, or when you send a prompt that a pane button (**To prompt**, **Ask Claude to change it**) filled in; what it reads then becomes part of the conversation, like a file Claude reads. [PRIVACY.md](PRIVACY.md) has the whole account.
 
 While the proxy is on, it runs:
 
@@ -341,7 +341,7 @@ Only when you press the button for it:
 Files it writes:
 
 - **`ca`, `certs`:** the CA (RSA-2048, the key readable by you only) and the certificates made from it.
-- **`flows/<run>`:** the headers, bodies, WebSocket messages and events of recorded requests. They can hold the passwords, tokens and personal data of the apps you debug. A run's folder is deleted two days after its last use.
+- **`flows/<run>`:** the headers, bodies, WebSocket messages and events of recorded requests. They can hold the passwords, tokens and personal data of the apps you debug. When a proxy starts, it deletes the run folders not changed for two days; nothing deletes them on a timer. A running proxy keeps the files of its latest 2000 requests.
 - **`sidecar.json`, `sidecar.log`:** where the running proxy is, and its log.
 - **`tracking.json`, `trusted-scripts.json`:** the tracked domains, and the rule scripts you approved.
 - **`system-proxy-backup.json`, `android-proxied.json`:** what to put back. The proxy process reads these and obeys them: it restores the system proxy and points the listed Android devices back if its last session vanished.
@@ -374,7 +374,7 @@ The client refused the proxy's certificate. Either it does not trust the CA yet,
 Some runtimes ignore the system proxy. The troubleshooting skill has the few lines that fix it in a debug build.
 
 **Does my traffic leave my machine?**
-Only to the servers it was going to anyway. Recordings stay in `~/.claude/proxy-mod`. Claude reads a request only through a tool.
+Only to the servers it was going to anyway, unless you set an upstream proxy or a rule sends it elsewhere. Recordings stay in `~/.claude/proxy-mod`. Claude reads a request only through a tool, or in a prompt you send. With **Listen on LAN** the proxy asks no password, so turn it off when the phone is done.
 
 **Does it capture Claude Code's own traffic, or the commands Claude runs?**
 No. It captures the clients you point at it.

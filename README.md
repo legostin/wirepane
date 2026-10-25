@@ -311,7 +311,7 @@ A mod runs sandboxed, with no sockets of its own, so the proxy is a small Node.j
 
 ## What it runs and what it changes
 
-Wirepane sends nothing of its own anywhere: no telemetry, no update checks, no downloads. It connects only to the servers the clients you point at it asked for. A request reaches Claude only when Claude calls a tool; what it reads then becomes part of the conversation, like a file Claude reads.
+Wirepane sends nothing of its own anywhere: no telemetry, no update checks, no downloads. The proxy reads each request a client sends it (the URL, the headers and the body, which can include tokens and personal data from the app you are debugging) and forwards that request to the host in the URL. With an upstream proxy set, it sends the same request there instead, and that proxy connects onward. Recordings stay in `~/.claude/proxy-mod` until you delete them. A request reaches Claude only when Claude calls a tool; what it reads then becomes part of the conversation, like a file Claude reads.
 
 While the proxy is on, it runs:
 
@@ -319,7 +319,9 @@ While the proxy is on, it runs:
 - **The session links:** `node sidecar/attach.mjs`, one per session, which passes the proxy's events to the mod.
 - **The watchdog:** `node sidecar/watchdog.mjs`, which puts the system proxy back if the proxy is killed.
 - **`openssl`:** makes the CA and the host certificates.
-- **System tools:** `route`, `networksetup` and `scutil` find this Mac's addresses and read the system proxy. `ps` and `lsof` tell Claude's own connections apart. The doctor uses `ps`, `lsof` and `adb` too.
+- **System tools:** `route`, `networksetup` and `scutil` find this Mac's addresses and read the system proxy. `ps` and `lsof` tell Claude's own connections apart. The doctor uses `ps`, `lsof` and `adb` too. Stopping the proxy runs `kill` on its pid.
+- **`curl` to this Mac only:** if a proxy that did not shut down left the system proxy on, Wirepane asks `curl` whether `http://127.0.0.1:<that port>/` still answers (no proxy, two seconds) before putting the old settings back. The control socket the tools use is the same kind of call, to `http://127.0.0.1:<port>/` on this machine.
+- **A shell, only for two buttons:** **Android → Start through the proxy** runs `/bin/sh -c` so `emulator` keeps running after the press, and **Turn on for this Mac** runs `osascript` with the `networksetup` commands when macOS asks for an administrator. The port, the emulator name and the network service are this Mac's; the programs are those named ones.
 
 Only when you press the button for it:
 
@@ -331,7 +333,7 @@ Only when you press the button for it:
 | **Browser → Open** | `open -na <browser>` with a profile of its own | Nothing outside `~/.claude/proxy-mod/browser` |
 | **Android → Start through the proxy**, **Android → proxy**, **Point USB phones** | `emulator -http-proxy`, `adb shell settings put global http_proxy`, `adb reverse` | The device's proxy, put back by **Revert** and when the proxy stops |
 | **Health → Trust in all apps** (Android) | `adb root`, `adb push`, a shell script that mounts a tmpfs over the system CA store | The emulator's system CAs, until it reboots |
-| **Health → Accept its certificate**, **Never decrypt it** | Nothing | The plugin option, which restarts the proxy |
+| **Listen on LAN**, **Health → Accept its certificate**, **Never decrypt it**, **Use it upstream** | Nothing | This plugin's own settings, `wirepane.listen`, `wirepane.insecureHosts`, `wirepane.noDecrypt` and `wirepane.upstreamProxy`. The proxy restarts with them. None of these is Claude's permission mode |
 | **Install Node.js**, shown when no Node was found | `brew install node` | Node.js from Homebrew |
 
 Files it writes:
@@ -340,8 +342,8 @@ Files it writes:
 - **`flows/<run>`:** the headers, bodies, WebSocket messages and events of recorded requests. They can hold the passwords, tokens and personal data of the apps you debug. A run's folder is deleted two days after its last use.
 - **`sidecar.json`, `sidecar.log`:** where the running proxy is, and its log.
 - **`tracking.json`, `trusted-scripts.json`:** the tracked domains, and the rule scripts you approved.
-- **`system-proxy-backup.json`, `android-proxied.json`:** what to put back.
-- **`<project>/.claude/proxy-rules.json`:** written once you or Claude add a rule.
+- **`system-proxy-backup.json`, `android-proxied.json`:** what to put back. The proxy process reads these and obeys them: it restores the system proxy and points the listed Android devices back if its last session vanished.
+- **`<project>/.claude/proxy-rules.json`:** written once you or Claude add a rule. The proxy process reads it and applies those rules.
 
 All of these live in `~/.claude/proxy-mod` except the rules file, which lives in your project.
 

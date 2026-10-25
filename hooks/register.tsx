@@ -414,10 +414,10 @@ async function startProxy($: EngineInterface, options: Options): Promise<void> {
           } else if (event.t === 'held') {
             const { t, ...held } = event
             void t
-            await update($, heldAtom, list => [...(list ?? []).filter(h => h.id !== held.id), held])
+            await update($, heldAtom, list => [...(list ?? []).filter(row => row.id !== held.id), held])
             $.ui.toast(`proxy: ${held.view.method} ${held.view.url.replace(/^https?:\/\//, '')} is held at a breakpoint`)
           } else if (event.t === 'released') {
-            await update($, heldAtom, list => (list ?? []).filter(h => h.id !== event.id))
+            await update($, heldAtom, list => (list ?? []).filter(row => row.id !== event.id))
           } else if (event.t === 'cleared') {
             rt.pending.clear()
             await update($, flowsAtom, () => [])
@@ -1557,9 +1557,9 @@ async function sendFromPane($: EngineInterface, id: number, to: 'client' | 'serv
 }
 
 /** A JSON-lines log the sidecar keeps (WebSocket messages, server-sent events); empty when unreadable. */
-async function readRecords<T>($: EngineInterface, file: string): Promise<T[]> {
+async function readRecords($: EngineInterface, file: string): Promise<unknown[]> {
   try {
-    return parseRecords<T>(await $.fs.read(file))
+    return parseRecords(await $.fs.read(file))
   } catch {
     return []
   }
@@ -1587,9 +1587,9 @@ async function drawDetail($: EngineInterface, e: PaneEvent, id: number, options:
   const reqBody = detail ? await loadBody($, detail.req, detail.reqHeaders.find(([k]) => k.toLowerCase() === 'content-type')?.[1] ?? null) : null
   const resBody = detail ? await loadBody($, detail.res, flow.contentType) : null
   const url = detail?.url ?? flowUrl(flow)
-  const messages = detail?.ws ? await readRecords<WsRecord>($, detail.ws.file) : []
+  const messages = detail?.ws ? ((await readRecords($, detail.ws.file)) as WsRecord[]) : []
   const notice = await read($, noticeAtom)
-  const events = detail?.sse ? await readRecords<SseRecord>($, detail.sse.file) : []
+  const events = detail?.sse ? ((await readRecords($, detail.sse.file)) as SseRecord[]) : []
   const lineWidth = Math.max(40, (e.props.bodyColumns ?? 100) - 4)
   const view = await read($, viewAtom)
   const reqType = detail?.reqHeaders.find(([k]) => k.toLowerCase() === 'content-type')?.[1] ?? null
@@ -2039,14 +2039,6 @@ async function drawSetup($: EngineInterface, e: PaneEvent, tab: ProxySetupTab, o
   const isLocalOnly = options.listen !== 'lan'
   const others = facts.status.lan.filter(entry => !entry.isPrimary)
   const kindName = (kind: string) => (kind === 'vpn' ? 'VPN' : kind === 'virtual' ? 'virtual machines' : 'another network')
-  const setListen = (value: 'lan' | 'local') => async () => {
-    // the engine reloads the mod with the new option; the proxy restarts on it
-    // the row's key as /config names it for this install ("wirepane.listen", or a marketplace's spelling)
-    const rows = await $.config.list().catch(() => [])
-    const key = rows.find(row => /(^|[.:@])listen$/.test(row.key) && JSON.stringify(row.provider ?? '').includes('wirepane'))?.key ?? 'wirepane.listen'
-    const result = await $.config.set({ key, value })
-    await say($, 'deny' in result && result.deny ? `Could not change Proxy reachable from: ${result.deny}` : value === 'lan' ? 'Listening on the network now.' : 'Listening on this Mac only now.')
-  }
 
   // clients on the network: what each sent, and how often it refused our certificate
   const phoneClients = [...flows.reduce((byAddress, flow) => {
@@ -2209,11 +2201,11 @@ async function drawSetup($: EngineInterface, e: PaneEvent, tab: ProxySetupTab, o
           {isLocalOnly ? (
             <Box flexDirection="row" gap={1} flexWrap="wrap">
               <Text color="warning">The proxy is reachable from this Mac only: a phone cannot reach it yet.</Text>
-              <Button key="listen-lan" hotkey="l" variant="primary" label="Listen on LAN" onPress={() => void setListen('lan')()} />
+              <Button key="listen-lan" hotkey="l" variant="primary" label="Listen on LAN" onPress={() => void setListen($, 'lan')} />
             </Box>
           ) : null}
           {qrBlock}
-          {!isLocalOnly ? <Button plain dimColor key="listen-local" label="back to this Mac only" onPress={() => void setListen('local')()} /> : null}
+          {!isLocalOnly ? <Button plain dimColor key="listen-local" label="back to this Mac only" onPress={() => void setListen($, 'local')} /> : null}
           <Text dimColor>Connecting a phone? Turn on Domains (d) to record only your app: its system services keep working.</Text>
         </Box>
       ) : null}
@@ -2628,17 +2620,31 @@ async function doFix($: EngineInterface, action: DoctorAction, options: Options)
 
 /** Adds a host to a comma-separated plugin option; the engine reloads the mod with it, and the proxy restarts on it. */
 async function appendOption($: EngineInterface, name: 'insecureHosts' | 'noDecrypt', host: string, now: string): Promise<void> {
-  const hosts = now.split(',').map(h => h.trim()).filter(Boolean)
+  const hosts = now.split(',').map(host => host.trim()).filter(Boolean)
   if (hosts.includes(host)) return
   await setOption($, name, [...hosts, host].join(','), `${host} added; the proxy restarts with it.`)
 }
 
-/** Sets one plugin option, by the key /config names it for this install. */
-async function setOption($: EngineInterface, name: string, value: string, done = 'Set; the proxy restarts with it.'): Promise<void> {
-  const rows = await $.config.list().catch(() => [])
-  const key = rows.find(row => new RegExp(`(^|[.:@])${name}$`).test(row.key) && JSON.stringify(row.provider ?? '').includes('wirepane'))?.key ?? `wirepane.${name}`
-  const result = await $.config.set({ key, value })
+/** Sets one plugin option. Each key is fixed text, so it cannot be read as Claude's permission mode. */
+async function setOption($: EngineInterface, name: 'insecureHosts' | 'noDecrypt' | 'upstreamProxy', value: string, done = 'Set; the proxy restarts with it.'): Promise<void> {
+  if (name === 'insecureHosts') {
+    const result = await $.config.set({ key: 'wirepane.insecureHosts', value })
+    await say($, 'deny' in result && result.deny ? `Could not change the setting: ${result.deny}` : done)
+    return
+  }
+  if (name === 'noDecrypt') {
+    const result = await $.config.set({ key: 'wirepane.noDecrypt', value })
+    await say($, 'deny' in result && result.deny ? `Could not change the setting: ${result.deny}` : done)
+    return
+  }
+  const result = await $.config.set({ key: 'wirepane.upstreamProxy', value })
   await say($, 'deny' in result && result.deny ? `Could not change the setting: ${result.deny}` : done)
+}
+
+/** Listen on LAN. The engine reloads the mod with the new option, and the proxy restarts on it. */
+async function setListen($: EngineInterface, value: 'lan' | 'local'): Promise<void> {
+  const result = await $.config.set({ key: 'wirepane.listen', value })
+  await say($, 'deny' in result && result.deny ? `Could not change Proxy reachable from: ${result.deny}` : value === 'lan' ? 'Listening on the network now.' : 'Listening on this Mac only now.')
 }
 
 /** Puts the CA among an emulator's system CAs (an image that allows root), so every app trusts it until it reboots. */
@@ -2963,7 +2969,7 @@ async function describeRequest($: EngineInterface, id: number, view: RequestView
     return out.join('\n')
   }
   if (detail.ruleLog?.length) out.push(`rules: ${detail.ruleLog.join(' · ')}`)
-  const held = (await read($, heldAtom)).find(h => h.id === id)
+  const held = (await read($, heldAtom)).find(row => row.id === id)
   if (held) {
     out.push(
       '',
@@ -3029,9 +3035,9 @@ async function describeRequest($: EngineInterface, id: number, view: RequestView
     if (detail.ws) {
       const close = detail.ws.close ? `; closed ${detail.ws.close.code ?? ''}${detail.ws.close.reason ? ` "${detail.ws.close.reason}"` : ''} by ${detail.ws.close.by}` : ''
       out.push('', `WebSocket: ${streamNote(flow) || 'no messages'}${detail.ws.isMock ? '; Wirepane plays the server (a rule)' : ''}${close}. → is client to server, ← server to client.`)
-      page(await readRecords<WsRecord>($, detail.ws.file), wsLine, 'messages', detail.ws.file)
+      page((await readRecords($, detail.ws.file)) as WsRecord[], wsLine, 'messages', detail.ws.file)
     }
-    if (detail.sse) page(await readRecords<SseRecord>($, detail.sse.file), sseLine, 'server-sent events', detail.sse.file)
+    if (detail.sse) page((await readRecords($, detail.sse.file)) as SseRecord[], sseLine, 'server-sent events', detail.sse.file)
   }
   return out.join('\n')
 }
@@ -3078,14 +3084,14 @@ async function findIn($: EngineInterface, flow: ProxyFlow, text: string, where: 
   const found = look('request body', req.text) ?? look('response body', res.text)
   if (found) return found
   if (detail.ws) {
-    const messages = await readRecords<WsRecord>($, detail.ws.file)
+    const messages = (await readRecords($, detail.ws.file)) as WsRecord[]
     for (let i = 0; i < messages.length; i++) {
       const hit = look(`message ${i + 1}`, messages[i]!.text ?? messages[i]!.view)
       if (hit) return hit
     }
   }
   if (detail.sse) {
-    const events = await readRecords<SseRecord>($, detail.sse.file)
+    const events = (await readRecords($, detail.sse.file)) as SseRecord[]
     for (let i = 0; i < events.length; i++) {
       const hit = look(`event ${i + 1}`, events[i]!.data)
       if (hit) return hit
@@ -3106,7 +3112,7 @@ async function exportHar($: EngineInterface, filter: string, file?: string): Pro
   for (const flow of flows) {
     const exchange = await exchangeOf($, flow.id)
     if (!exchange) continue
-    const messages = exchange.detail.ws ? await readRecords<WsRecord>($, exchange.detail.ws.file) : undefined
+    const messages = exchange.detail.ws ? ((await readRecords($, exchange.detail.ws.file)) as WsRecord[]) : undefined
     exchanges.push({ ...exchange, ...(messages ? { messages } : {}) })
   }
   const root = await $.session.root()
@@ -3577,7 +3583,7 @@ export const register: Register = (on, raw) => {
     const id = Number(e.id)
     const action = e.action === 'respond' || e.action === 'abort' ? e.action : 'continue'
     const answer = await resumeHeld($, id, { action, changes: e.changes, respond: e.respond })
-    if (answer.error) return { result: `Not let go: ${answer.error}.${answer.held ? ` Held now: ${answer.held.length ? answer.held.map(h => `#${h}`).join(', ') : 'nothing'}.` : ''}` }
+    if (answer.error) return { result: `Not let go: ${answer.error}.${answer.held ? ` Held now: ${answer.held.length ? answer.held.map(heldId => `#${heldId}`).join(', ') : 'nothing'}.` : ''}` }
     const said = action === 'abort' ? 'cut' : action === 'respond' ? 'answered by hand' : e.changes ? 'let go with your changes' : 'let go as it was'
     return { result: `#${id} ${said}. wait_for_request({ filter: 'is:ok', since: ${id - 1} }) or get_request({ id: ${id} }) shows how it ended.` }
   }).catch(() => ({ deny: 'proxy: could not reach the proxy; try again.' }))

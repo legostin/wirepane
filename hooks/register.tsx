@@ -590,7 +590,7 @@ function copyThen(
   $: EngineInterface,
   text: string,
   surface: Parameters<EngineInterface['ui']['copy']>[0]['surface'],
-  done: (isCopied: boolean) => void | Promise<void>,
+  done: (isCopied: boolean) => unknown,
 ): void {
   const copying = $.ui.copy({ text, surface })
   void copying.then(result => {
@@ -2647,26 +2647,41 @@ async function appendOption($: EngineInterface, name: 'insecureHosts' | 'noDecry
   await setOption($, name, [...hosts, host].join(','), `${host} added; the proxy restarts with it.`)
 }
 
+// $.config.set rejects a key no /config row has: with another plugin named
+// wirepane on (a --plugin-dir copy beside the installed one), /config names
+// both copies' rows by their ids, and wirepane.<name> is neither
+function configSetFailure(error: unknown): string {
+  return `${error instanceof Error ? error.message : String(error)}. Change it in /config.`
+}
+
 /** Sets one plugin option. Each key is fixed text, so it cannot be read as Claude's permission mode. */
 async function setOption($: EngineInterface, name: 'insecureHosts' | 'noDecrypt' | 'upstreamProxy', value: string, done = 'Set; the proxy restarts with it.'): Promise<void> {
-  if (name === 'insecureHosts') {
-    const result = await $.config.set({ key: 'wirepane.insecureHosts', value: value })
+  try {
+    if (name === 'insecureHosts') {
+      const result = await $.config.set({ key: 'wirepane.insecureHosts', value: value })
+      await say($, 'deny' in result && result.deny ? `Could not change the setting: ${result.deny}` : done)
+      return
+    }
+    if (name === 'noDecrypt') {
+      const result = await $.config.set({ key: 'wirepane.noDecrypt', value: value })
+      await say($, 'deny' in result && result.deny ? `Could not change the setting: ${result.deny}` : done)
+      return
+    }
+    const result = await $.config.set({ key: 'wirepane.upstreamProxy', value: value })
     await say($, 'deny' in result && result.deny ? `Could not change the setting: ${result.deny}` : done)
-    return
+  } catch (error) {
+    await say($, `Could not change the setting: ${configSetFailure(error)}`)
   }
-  if (name === 'noDecrypt') {
-    const result = await $.config.set({ key: 'wirepane.noDecrypt', value: value })
-    await say($, 'deny' in result && result.deny ? `Could not change the setting: ${result.deny}` : done)
-    return
-  }
-  const result = await $.config.set({ key: 'wirepane.upstreamProxy', value: value })
-  await say($, 'deny' in result && result.deny ? `Could not change the setting: ${result.deny}` : done)
 }
 
 /** Listen on LAN. The engine reloads the mod with the new option, and the proxy restarts on it. */
 async function setListen($: EngineInterface, value: 'lan' | 'local'): Promise<void> {
-  const result = await $.config.set({ key: 'wirepane.listen', value: value })
-  await say($, 'deny' in result && result.deny ? `Could not change Proxy reachable from: ${result.deny}` : value === 'lan' ? 'Listening on the network now.' : 'Listening on this Mac only now.')
+  try {
+    const result = await $.config.set({ key: 'wirepane.listen', value: value })
+    await say($, 'deny' in result && result.deny ? `Could not change Proxy reachable from: ${result.deny}` : value === 'lan' ? 'Listening on the network now.' : 'Listening on this Mac only now.')
+  } catch (error) {
+    await say($, `Could not change Proxy reachable from: ${configSetFailure(error)}`)
+  }
 }
 
 /** Puts the CA among an emulator's system CAs (an image that allows root), so every app trusts it until it reboots. */

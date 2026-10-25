@@ -311,7 +311,7 @@ A mod runs sandboxed, with no sockets of its own, so the proxy is a small Node.j
 
 ## What it runs and what it changes
 
-Wirepane sends nothing of its own anywhere: no telemetry, no update checks, no downloads. The proxy reads each request a client sends it (the URL, the headers and the body, which can include tokens and personal data from the app you are debugging) and forwards that request to the host in the URL. With an upstream proxy set, it sends the same request there instead, and that proxy connects onward. Recordings stay in `~/.claude/proxy-mod` until you delete them. A request reaches Claude only when Claude calls a tool; what it reads then becomes part of the conversation, like a file Claude reads.
+Wirepane sends nothing of its own anywhere: no telemetry, no update checks. The proxy reads each request a client sends it (the URL, the headers and the body, which can include tokens and personal data from the app you are debugging) and forwards that request to the host in the URL. With an upstream proxy set, it sends the same request there instead, and that proxy connects onward. An upstream given as `pac+http(s)://…` is a PAC file: the proxy downloads it when a request first needs it, and again once its copy is ten minutes old, and runs its `FindProxyForURL` in a sandbox to pick the upstream for each request. Recordings stay on this Mac, in `~/.claude/proxy-mod`; a run's folder is deleted two days after its last use. A request reaches Claude only when Claude calls a tool; what it reads then becomes part of the conversation, like a file Claude reads.
 
 While the proxy is on, it runs:
 
@@ -319,9 +319,11 @@ While the proxy is on, it runs:
 - **The session links:** `node sidecar/attach.mjs`, one per session, which passes the proxy's events to the mod.
 - **The watchdog:** `node sidecar/watchdog.mjs`, which puts the system proxy back if the proxy is killed.
 - **`openssl`:** makes the CA and the host certificates.
-- **System tools:** `route`, `networksetup` and `scutil` find this Mac's addresses and read the system proxy. `ps` and `lsof` tell Claude's own connections apart. The doctor uses `ps`, `lsof` and `adb` too. Stopping the proxy runs `kill` on its pid.
-- **`curl` to this Mac only:** if a proxy that did not shut down left the system proxy on, Wirepane asks `curl` whether `http://127.0.0.1:<that port>/` still answers (no proxy, two seconds) before putting the old settings back. The control socket the tools use is the same kind of call, to `http://127.0.0.1:<port>/` on this machine.
-- **A shell, only for two buttons:** **Android → Start through the proxy** runs `/bin/sh -c` so `emulator` keeps running after the press, and **Turn on for this Mac** runs `osascript` with the `networksetup` commands when macOS asks for an administrator. The port, the emulator name and the network service are this Mac's; the programs are those named ones.
+- **System tools:** `route`, `networksetup` and `scutil` find this Mac's addresses and read the system proxy. `ps` and `lsof` tell Claude's own connections apart. The doctor uses `ps`, `lsof` and `adb` too.
+- **`kill`, by pid:** on the proxy and on the session link when the proxy stops, a session leaves or a session links up again after a `/clear`, on a proxy of Wirepane 0.7 still holding the port when the proxy starts, and on the old proxy the doctor's **Stop it and start** names.
+- **`curl` to this Mac only:** if a proxy that did not shut down left the system proxy on, Wirepane asks `curl` whether `http://127.0.0.1:<that port>/` still answers (no proxy, two seconds) before putting the old settings back. The control socket the tools use is the same kind of call, to `http://127.0.0.1:<port>/` on this machine. `replay_request` sends a recorded request again with `curl` through the proxy on `127.0.0.1`, which forwards it to its host like any other request.
+- **`/bin/sh -c`, for an emulator:** **Android → Start through the proxy** starts `emulator` with `nohup`, so it keeps running after the press, then waits for it to boot with `adb`, `seq`, `awk`, `head`, `tr` and `sleep`. The port and the emulator name are this Mac's.
+- **`osascript`, when macOS asks for an administrator:** the `networksetup` commands that turn the system proxy on or put it back run again through `osascript … with administrator privileges` when macOS refuses them without one, and macOS shows its password dialog. That can happen on **Turn on for this Mac**, **Turn off** and **iOS → Use**, when the proxy stops, on the doctor's **Put back**, and when a session starts and finds the system proxy left on by a proxy that did not shut down.
 
 Only when you press the button for it:
 

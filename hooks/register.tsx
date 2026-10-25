@@ -2517,8 +2517,8 @@ async function doctorFacts($: EngineInterface, options: Options): Promise<Doctor
   const autoProxyUrl = /^Enabled:\s*Yes/m.test(autoProxy) ? (/^URL:\s*(\S+)/m.exec(autoProxy)?.[1] ?? null) : null
   const socks = service ? parseProxyState(await commandOutput($, ['networksetup', '-getsocksfirewallproxy', service])) : null
   const route = /interface:\s*(\S+)/.exec(await commandOutput($, ['route', '-n', 'get', 'default']))?.[1] ?? ''
-  const processes = (await commandOutput($, ['ps', '-axo', 'comm='])).split('\n').map(line => line.trim())
-  const otherProxies = [...new Set(OTHER_PROXIES.filter(([pattern]) => processes.some(name => pattern.test(name))).map(([, name]) => name))]
+  const programNames = (await commandOutput($, ['ps', '-axo', 'comm='])).split('\n').map(line => line.trim())
+  const otherProxies = [...new Set(OTHER_PROXIES.filter(([pattern]) => programNames.some(name => pattern.test(name))).map(([, name]) => name))]
   let portHolder: string | null = null
   let oldProxyPid: number | null = null
   if (status.phase === 'failed' && /port-busy|EADDRINUSE|in use/i.test(status.error ?? '')) {
@@ -2550,11 +2550,11 @@ async function doctorFacts($: EngineInterface, options: Options): Promise<Doctor
   }
 }
 
-type ProcessInfo = NonNullable<ProxyHealth['process']>
+type ProxyInfo = NonNullable<ProxyHealth['process']>
 
-async function processInfo($: EngineInterface): Promise<ProcessInfo | null> {
+async function readProxyInfo($: EngineInterface): Promise<ProxyInfo | null> {
   const answer = await control($, 'info', {})
-  const info = answer as ControlAnswer & Partial<ProcessInfo> & { memory?: { rss: number } }
+  const info = answer as ControlAnswer & Partial<ProxyInfo> & { memory?: { rss: number } }
   if (info.error || info.pid === undefined) return null
   return {
     pid: info.pid,
@@ -2574,7 +2574,7 @@ async function processInfo($: EngineInterface): Promise<ProcessInfo | null> {
 async function runDoctor($: EngineInterface, options: Options): Promise<ProxyHealth> {
   const findings = diagnose(await doctorFacts($, options))
   const checkedAt = await $.clock.now()
-  const info = await processInfo($)
+  const info = await readProxyInfo($)
   const health: ProxyHealth = { checkedAt, findings, process: info }
   await update($, healthAtom, () => health)
   return health
@@ -2592,7 +2592,7 @@ function duration(ms: number): string {
 }
 
 /** The proxy process in one line: pid, version, time up, memory, what it keeps, who uses it. */
-async function processLine($: EngineInterface, info: ProcessInfo | null): Promise<string> {
+async function proxyLine($: EngineInterface, info: ProxyInfo | null): Promise<string> {
   if (!info) return 'No proxy process answers.'
   const me = await $.session.id()
   const others = info.sessions.filter(s => s.session !== me)
@@ -2722,7 +2722,7 @@ async function drawHealth($: EngineInterface, e: PaneEvent, options: Options): P
       <Text bold>Health{health.checkedAt ? ` · checked ${new Date(health.checkedAt).toLocaleTimeString()}` : ''}</Text>
       {busy ? <Text color="claude">{busy}</Text> : null}
       {notice ? <Text color="success">{notice}</Text> : null}
-      <Text dimColor>{await processLine($, health.process)}</Text>
+      <Text dimColor>{await proxyLine($, health.process)}</Text>
       {health.checkedAt === null ? <Text dimColor>Checking…</Text> : null}
       {health.findings.map((finding, i) => (
         <Box key={`finding-${i}`} flexDirection="column" marginTop={1}>
@@ -3488,7 +3488,7 @@ export const register: Register = (on, raw) => {
         await openHealth($, options)
         await openPane($)
         const health = await read($, healthAtom)
-        return { text: `${await processLine($, health.process)}\n\n${findingsText(health.findings)}` }
+        return { text: `${await proxyLine($, health.process)}\n\n${findingsText(health.findings)}` }
       }
       case 'restart':
         await restartProxy($, options)
@@ -3672,7 +3672,7 @@ export const register: Register = (on, raw) => {
 
   on('tool.call', { tool: 'mcp__wirepane__diagnose' }, async $ => {
     const health = await runDoctor($, options)
-    return { result: `${await processLine($, health.process)}\n\n${findingsText(health.findings)}` }
+    return { result: `${await proxyLine($, health.process)}\n\n${findingsText(health.findings)}` }
   }).catch(() => ({ deny: 'proxy: could not finish the checks; try again.' }))
 
   on('tool.call', { tool: 'mcp__wirepane__search_requests' }, async ($, e) => {

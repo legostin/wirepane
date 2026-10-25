@@ -32,7 +32,6 @@
     "server-sent-events",
     "websocket"
   ],
-  "types": "./types/index.d.ts",
   "userConfig": {
     "port": {
       "type": "number",

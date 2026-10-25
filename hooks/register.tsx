@@ -249,7 +249,7 @@ async function flush($: EngineInterface, rt: Runtime, options: Options): Promise
 }
 
 async function kill($: EngineInterface, pid: number): Promise<void> {
-  await $.process.run(['kill', String(pid)]).catch(() => undefined)
+  await orCatch($.process.run(['kill', String(pid)]), () => undefined)
 }
 
 function isRunning(): boolean {
@@ -404,9 +404,9 @@ async function startProxy($: EngineInterface, options: Options): Promise<void> {
             await update($, sessionsAtom, () => event.sessions)
           } else if (event.t === 'tracking') {
             // the proxy's tracked domains, which every attached session shares
-            const next: ProxyTracking = { enabled: event.enabled, patterns: event.patterns }
-            await update($, trackingAtom, () => next)
-            await $.store.set(`tracking:${await $.session.id()}`, next).catch(() => undefined)
+            const tracked: ProxyTracking = { enabled: event.enabled, patterns: event.patterns }
+            await update($, trackingAtom, () => tracked)
+            await orCatch($.store.set(`tracking:${await $.session.id()}`, tracked), () => undefined)
           } else if (event.t === 'pinned') {
             await update($, pinnedAtom, list => [...(list ?? []).filter(p => !(p.client === event.client && p.host === event.host)), { client: event.client, host: event.host }])
           } else if (event.t === 'unpinned') {
@@ -578,13 +578,31 @@ async function say($: EngineInterface, text: string): Promise<void> {
   await update($, noticeAtom, () => text)
 }
 
+/** The promise, or what `fallback` answers when it rejects. */
+function orCatch<T, F>(work: Promise<T>, fallback: (error: unknown) => F): Promise<T | F> {
+  return work.catch(error => fallback(error))
+}
+
+/** Copies text, then tells `done` whether the clipboard took it. */
+function copyThen(
+  $: EngineInterface,
+  text: string,
+  surface: Parameters<EngineInterface['ui']['copy']>[0]['surface'],
+  done: (isCopied: boolean) => void | Promise<void>,
+): void {
+  const copying = $.ui.copy({ text, surface })
+  void copying.then(result => {
+    void done(result.isCopied)
+  })
+}
+
 async function findBrowsers($: EngineInterface): Promise<{ browser: Browser; path: string }[]> {
   const home = (await $.env.get('HOME')) ?? ''
   const found: { browser: Browser; path: string }[] = []
   for (const browser of BROWSER_CANDIDATES) {
     for (const dir of ['/Applications', `${home}/Applications`]) {
       const path = `${dir}/${browser.app}`
-      if (await $.fs.exists(path).catch(() => false)) {
+      if (await orCatch($.fs.exists(path), () => false)) {
         found.push({ browser, path })
         break
       }
@@ -611,7 +629,7 @@ async function launchBrowser($: EngineInterface, options: Options, slug: string)
 async function addCaToSimulators($: EngineInterface): Promise<void> {
   const status = await read($, statusAtom)
   if (!status.ca) return say($, 'There is no certificate yet: start the proxy.')
-  const listed = await $.process.run(['xcrun', 'simctl', 'list', 'devices', 'booted', '-j']).catch(error => ({
+  const listed = await orCatch($.process.run(['xcrun', 'simctl', 'list', 'devices', 'booted', '-j']), error => ({
     exitCode: 1,
     stdout: '',
     stderr: String(error),
@@ -653,7 +671,7 @@ async function findNode($: EngineInterface): Promise<string | null> {
     [`${home}/Library/Application Support/fnm/node-versions`, 'installation/bin/node'],
     [`${home}/.local/share/fnm/node-versions`, 'installation/bin/node'],
   ] as const) {
-    const names = (await $.fs.list(dir).catch(() => [])).map(entry => entry.name)
+    const names = (await orCatch($.fs.list(dir), () => [])).map(entry => entry.name)
     managed.push(...newestNodeFirst(names).map(version => `${dir}/${version}/${bin}`))
   }
   const candidates = [
@@ -668,8 +686,8 @@ async function findNode($: EngineInterface): Promise<string | null> {
     '/opt/local/bin/node',
   ]
   for (const candidate of candidates) {
-    if (candidate !== 'node' && !(await $.fs.exists(candidate).catch(() => false))) continue
-    const ran = await $.process.run([candidate, '--version']).catch(() => null)
+    if (candidate !== 'node' && !(await orCatch($.fs.exists(candidate), () => false))) continue
+    const ran = await orCatch($.process.run([candidate, '--version']), () => null)
     if (ran?.exitCode === 0 && nodeMajor(ran.stdout) >= MIN_NODE) return candidate
   }
   return null
@@ -677,7 +695,7 @@ async function findNode($: EngineInterface): Promise<string | null> {
 
 async function findBrew($: EngineInterface): Promise<string | null> {
   for (const path of ['/opt/homebrew/bin/brew', '/usr/local/bin/brew']) {
-    if (await $.fs.exists(path).catch(() => false)) return path
+    if (await orCatch($.fs.exists(path), () => false)) return path
   }
   return null
 }
@@ -686,13 +704,13 @@ async function findBrew($: EngineInterface): Promise<string | null> {
 async function installNode($: EngineInterface, options: Options): Promise<void> {
   const brew = await findBrew($)
   if (!brew) {
-    await $.process.run(['open', NODE_DOWNLOAD]).catch(() => null)
+    await orCatch($.process.run(['open', NODE_DOWNLOAD]), () => null)
     return
   }
   await update($, busyAtom, () => 'Installing Node.js: brew install node…')
   let ran: { exitCode: number | null; stdout: string; stderr: string }
   try {
-    ran = await $.process.run([brew, 'install', 'node'], { timeoutMs: 600_000 }).catch(error => ({ exitCode: 1, stdout: '', stderr: String(error) }))
+    ran = await orCatch($.process.run([brew, 'install', 'node'], { timeoutMs: 600_000 }), error => ({ exitCode: 1, stdout: '', stderr: String(error) }))
   } finally {
     await update($, busyAtom, () => '')
   }
@@ -705,11 +723,11 @@ async function installNode($: EngineInterface, options: Options): Promise<void> 
 }
 
 async function adb($: EngineInterface): Promise<string | null> {
-  const onPath = await $.process.run(['adb', 'version']).catch(() => null)
-  if (onPath?.exitCode === 0) return 'adb'
+  const adbOnPath = await orCatch($.process.run(['adb', 'version']), () => null)
+  if (adbOnPath?.exitCode === 0) return 'adb'
   const home = (await $.env.get('HOME')) ?? ''
   const sdk = `${home}/Library/Android/sdk/platform-tools/adb`
-  return (await $.fs.exists(sdk).catch(() => false)) ? sdk : null
+  return (await orCatch($.fs.exists(sdk), () => false)) ? sdk : null
 }
 
 async function androidDevices($: EngineInterface, tool: string): Promise<string[]> {
@@ -753,9 +771,9 @@ async function revertAndroid($: EngineInterface): Promise<void> {
   const status = await read($, statusAtom)
   if (tool) {
     for (const serial of serials) {
-      await $.process.run([tool, '-s', serial, 'shell', 'settings', 'put', 'global', 'http_proxy', ':0']).catch(() => null)
+      await orCatch($.process.run([tool, '-s', serial, 'shell', 'settings', 'put', 'global', 'http_proxy', ':0']), () => null)
       if (!serial.startsWith('emulator-')) {
-        await $.process.run([tool, '-s', serial, 'reverse', '--remove', `tcp:${status.port}`]).catch(() => null)
+        await orCatch($.process.run([tool, '-s', serial, 'reverse', '--remove', `tcp:${status.port}`]), () => null)
       }
     }
   }
@@ -766,7 +784,7 @@ async function revertAndroid($: EngineInterface): Promise<void> {
 
 /** Which devices point at the proxy, on disk: a proxy whose last session vanished points them back itself. */
 async function recordAndroid($: EngineInterface, tool: string, port: number, serials: readonly string[]): Promise<void> {
-  await $.fs.write(`${await dataDirOf($)}/android-proxied.json`, serials.length ? JSON.stringify({ adb: tool, port, serials }) : '').catch(() => undefined)
+  await orCatch($.fs.write(`${await dataDirOf($)}/android-proxied.json`, serials.length ? JSON.stringify({ adb: tool, port, serials }) : ''), () => undefined)
 }
 
 async function openCaPageOnAndroid($: EngineInterface): Promise<void> {
@@ -869,9 +887,9 @@ async function editRules($: EngineInterface, change: (rules: Rule[]) => Rule[] |
     }
     if (data === null || typeof data !== 'object' || !Array.isArray(data.rules)) return `${file} must hold {"rules": [...]}`
   }
-  const next = change([...data.rules])
-  if (typeof next === 'string') return next
-  await $.fs.write(file, `${JSON.stringify({ ...data, rules: next }, null, 2)}\n`)
+  const edited = change([...data.rules])
+  if (typeof edited === 'string') return edited
+  await $.fs.write(file, `${JSON.stringify({ ...data, rules: edited }, null, 2)}\n`)
   await loadRules($)
   return null
 }
@@ -937,7 +955,7 @@ async function readSystemProxyBackup($: EngineInterface): Promise<SystemProxyBac
 /** Runs networksetup commands, as an administrator when it must; answers why not, or null. */
 async function runNetworkCommands($: EngineInterface, commands: string[][]): Promise<string | null> {
   for (const argv of commands) {
-    const ran = await $.process.run(argv).catch(error => ({ exitCode: 1, stdout: '', stderr: String(error) }))
+    const ran = await orCatch($.process.run(argv), error => ({ exitCode: 1, stdout: '', stderr: String(error) }))
     const output = `${ran.stdout}${ran.stderr}`
     if (ran.exitCode === 0 && !/\*\* Error/i.test(output)) continue
     if (!needsAdmin(output) && !/\*\* Error/i.test(output)) return output.trim() || `${argv[0]} failed`
@@ -948,7 +966,7 @@ async function runNetworkCommands($: EngineInterface, commands: string[][]): Pro
 }
 
 async function defaultNetworkService($: EngineInterface): Promise<string | null> {
-  const route = await $.process.run(['route', '-n', 'get', 'default']).catch(() => null)
+  const route = await orCatch($.process.run(['route', '-n', 'get', 'default']), () => null)
   const device = /interface:\s*(\S+)/.exec(route?.stdout ?? '')?.[1]
   const order = parseServiceOrder((await $.process.run(['networksetup', '-listnetworkserviceorder'])).stdout)
   return order.find(service => service.device === device && !service.isDisabled)?.name ?? order.find(service => service.name === 'Wi-Fi')?.name ?? null
@@ -1009,7 +1027,7 @@ async function disableSystemProxy($: EngineInterface, quiet = false): Promise<vo
 async function checkMacTrust($: EngineInterface): Promise<void> {
   const ca = (await read($, statusAtom)).ca
   if (!ca) return
-  const ran = await $.process.run(['security', 'verify-cert', '-c', ca.path]).catch(() => null)
+  const ran = await orCatch($.process.run(['security', 'verify-cert', '-c', ca.path]), () => null)
   const output = `${ran?.stdout ?? ''}${ran?.stderr ?? ''}`
   await update($, macTrustAtom, () => (/successful/i.test(output) ? 'trusted' : /NOT_TRUSTED|failed/i.test(output) ? 'untrusted' : 'unknown'))
 }
@@ -1044,7 +1062,7 @@ function runtimeRank(runtime: string): number {
 }
 
 async function scanSimulators($: EngineInterface): Promise<void> {
-  const ran = await $.process.run(['xcrun', 'simctl', 'list', 'devices', 'available', '-j'], { timeoutMs: 30_000 }).catch(error => ({
+  const ran = await orCatch($.process.run(['xcrun', 'simctl', 'list', 'devices', 'available', '-j'], { timeoutMs: 30_000 }), error => ({
     exitCode: 1,
     stdout: '',
     stderr: String(error),
@@ -1071,12 +1089,12 @@ async function scanSimulators($: EngineInterface): Promise<void> {
 }
 
 async function androidTool($: EngineInterface, name: 'adb' | 'emulator'): Promise<string | null> {
-  const onPath = await $.process.run([name, name === 'adb' ? 'version' : '-version']).catch(() => null)
-  if (onPath?.exitCode === 0) return name
+  const toolOnPath = await orCatch($.process.run([name, name === 'adb' ? 'version' : '-version']), () => null)
+  if (toolOnPath?.exitCode === 0) return name
   const home = (await $.env.get('HOME')) ?? ''
   const sdk = (await $.env.get('ANDROID_HOME')) ?? `${home}/Library/Android/sdk`
   const path = name === 'adb' ? `${sdk}/platform-tools/adb` : `${sdk}/emulator/emulator`
-  return (await $.fs.exists(path).catch(() => false)) ? path : null
+  return (await orCatch($.fs.exists(path), () => false)) ? path : null
 }
 
 async function scanAndroid($: EngineInterface): Promise<void> {
@@ -1192,17 +1210,17 @@ async function writeTrackingFile($: EngineInterface): Promise<string> {
 }
 
 async function setTracking($: EngineInterface, change: (now: ProxyTracking) => ProxyTracking): Promise<ProxyTracking> {
-  const next = await update($, trackingAtom, now => {
+  const updated = await update($, trackingAtom, now => {
     const changed = change(now ?? { enabled: false, patterns: [] })
     return { enabled: changed.enabled, patterns: [...new Set(changed.patterns)] }
   })
-  await $.store.set(`tracking:${await $.session.id()}`, next).catch(() => undefined)
+  await orCatch($.store.set(`tracking:${await $.session.id()}`, updated), () => undefined)
   await writeTrackingFile($)
-  return next
+  return updated
 }
 
 async function restoreTracking($: EngineInterface): Promise<void> {
-  const saved = (await $.store.get(`tracking:${await $.session.id()}`).catch(() => undefined)) as ProxyTracking | undefined
+  const saved = (await orCatch($.store.get(`tracking:${await $.session.id()}`), () => undefined)) as ProxyTracking | undefined
   if (saved && typeof saved.enabled === 'boolean' && Array.isArray(saved.patterns)) {
     await update($, trackingAtom, () => ({ enabled: saved.enabled, patterns: saved.patterns.filter(p => typeof p === 'string') }))
   }
@@ -1604,7 +1622,7 @@ async function drawDetail($: EngineInterface, e: PaneEvent, id: number, options:
   ]
   const fallback: DetailTab = detail?.ws ? 'messages' : detail?.sse ? 'events' : flow.state === 'error' && !detail?.resHeaders.length ? 'request' : 'response'
   const tab: DetailTab = tabs.some(t => t.tab === view.detailTab) ? view.detailTab! : fallback
-  const setTab = (next: DetailTab) => () => void update($, viewAtom, (v): ProxyView => ({ ...v, detailTab: next, detailMatch: 0 }))
+  const setTab = (chosen: DetailTab) => () => void update($, viewAtom, (v): ProxyView => ({ ...v, detailTab: chosen, detailMatch: 0 }))
 
   // find: the tab as lines (headers, then the body as shown), every match, and the window around the current one
   const search = view.detailSearch ?? ''
@@ -1868,9 +1886,7 @@ async function drawSetup($: EngineInterface, e: PaneEvent, tab: ProxySetupTab, o
   const isRunning = status.phase === 'running'
 
   const copy = (key: string) => (press: { surface: Parameters<EngineInterface['ui']['copy']>[0]['surface'] }) =>
-    void $.ui.copy({ text: commands[key] ?? '', surface: press.surface }).then(result =>
-      update($, noticeAtom, () => (result.isCopied ? 'Copied.' : 'Could not copy.')),
-    )
+    copyThen($, commands[key] ?? '', press.surface, isCopied => update($, noticeAtom, () => (isCopied ? 'Copied.' : 'Could not copy.')))
   const run = (action: () => Promise<void>) => () => void action()
 
   let actions: RenderElement[] = []
@@ -2175,9 +2191,7 @@ async function drawSetup($: EngineInterface, e: PaneEvent, tab: ProxySetupTab, o
                 hotkey="i"
                 label={`copy ${phone.address}`}
                 onPress={press =>
-                  void $.ui.copy({ text: phone.address, surface: press.surface }).then(result =>
-                    say($, result.isCopied ? `Copied ${phone.address}.` : 'Could not copy.'),
-                  )
+                  copyThen($, phone.address, press.surface, isCopied => say($, isCopied ? `Copied ${phone.address}.` : 'Could not copy.'))
                 }
               />
             </Box>
@@ -2329,7 +2343,7 @@ async function drawRules($: EngineInterface, e: PaneEvent): Promise<RenderElemen
   const notice = await read($, noticeAtom)
   const view = await read($, viewAtom)
   const hits = (id: string) => flows.filter(flow => flow.rules?.includes(id)).length
-  const on = rules.entries.filter(entry => entry.enabled && entry.errors.length === 0 && !entry.isUntrusted).length
+  const enabledCount = rules.entries.filter(entry => entry.enabled && entry.errors.length === 0 && !entry.isUntrusted).length
   const shownFile = rules.file?.replace(/^.*\/(\.claude\/proxy-rules\.json)$/, '$1') ?? '.claude/proxy-rules.json'
 
   return (
@@ -2339,7 +2353,7 @@ async function drawRules($: EngineInterface, e: PaneEvent): Promise<RenderElemen
         <Button key="rules-reload" hotkey="g" label="Reload" onPress={() => void loadRules($)} />
       </Box>
       <Text bold>
-        Rules · {shownFile} · {rules.entries.length} {rules.entries.length === 1 ? 'rule' : 'rules'}, {on} on
+        Rules · {shownFile} · {rules.entries.length} {rules.entries.length === 1 ? 'rule' : 'rules'}, {enabledCount} on
       </Text>
       <Text dimColor>The first rule applies first; every matching rule that is on applies, in order, unless one says stop.</Text>
       {rules.fileErrors.map((error, i) => (
@@ -2428,8 +2442,8 @@ async function drawRules($: EngineInterface, e: PaneEvent): Promise<RenderElemen
 // and from what the proxy saw; hooks/doctor.ts reads them into findings, each
 // with its fix, and the Health view has a button for the fixes Wirepane can do.
 
-async function run($: EngineInterface, argv: string[], timeoutMs = 5000): Promise<string> {
-  const ran = await $.process.run(argv, { timeoutMs }).catch(() => null)
+async function commandOutput($: EngineInterface, argv: string[], timeoutMs?: number): Promise<string> {
+  const ran = await orCatch($.process.run(argv, { timeoutMs: timeoutMs ?? 5000 }), () => null)
   return ran?.exitCode === 0 ? ran.stdout : ''
 }
 
@@ -2437,7 +2451,7 @@ async function run($: EngineInterface, argv: string[], timeoutMs = 5000): Promis
 async function caHash($: EngineInterface): Promise<string | null> {
   const ca = (await read($, statusAtom)).ca
   if (!ca) return null
-  const hash = (await run($, ['openssl', 'x509', '-inform', 'PEM', '-subject_hash_old', '-noout', '-in', ca.path])).trim()
+  const hash = (await commandOutput($, ['openssl', 'x509', '-inform', 'PEM', '-subject_hash_old', '-noout', '-in', ca.path])).trim()
   return /^[0-9a-f]{8}$/.test(hash) ? hash : null
 }
 
@@ -2447,7 +2461,7 @@ async function androidFacts($: EngineInterface): Promise<AndroidFacts[]> {
   const hash = await caHash($)
   const out: AndroidFacts[] = []
   for (const serial of await androidDevices($, tool).catch(() => [])) {
-    const shell = async (...command: string[]) => (await run($, [tool, '-s', serial, 'shell', ...command])).trim()
+    const shell = async (...command: string[]) => (await commandOutput($, [tool, '-s', serial, 'shell', ...command])).trim()
     const sdk = Number(await shell('getprop', 'ro.build.version.sdk')) || null
     // Google APIs and AOSP images are userdebug and allow root; Google Play ones are user and do not
     const type = await shell('getprop', 'ro.build.type')
@@ -2494,26 +2508,26 @@ async function doctorFacts($: EngineInterface, options: Options): Promise<Doctor
   const systemProxy = service
     ? {
         service,
-        web: parseProxyState(await run($, ['networksetup', '-getwebproxy', service])),
-        secure: parseProxyState(await run($, ['networksetup', '-getsecurewebproxy', service])),
+        web: parseProxyState(await commandOutput($, ['networksetup', '-getwebproxy', service])),
+        secure: parseProxyState(await commandOutput($, ['networksetup', '-getsecurewebproxy', service])),
       }
     : null
   // what else the network service routes through: a PAC file, a SOCKS proxy
-  const autoProxy = service ? await run($, ['networksetup', '-getautoproxyurl', service]) : ''
+  const autoProxy = service ? await commandOutput($, ['networksetup', '-getautoproxyurl', service]) : ''
   const autoProxyUrl = /^Enabled:\s*Yes/m.test(autoProxy) ? (/^URL:\s*(\S+)/m.exec(autoProxy)?.[1] ?? null) : null
-  const socks = service ? parseProxyState(await run($, ['networksetup', '-getsocksfirewallproxy', service])) : null
-  const route = /interface:\s*(\S+)/.exec(await run($, ['route', '-n', 'get', 'default']))?.[1] ?? ''
-  const processes = (await run($, ['ps', '-axo', 'comm='])).split('\n').map(line => line.trim())
+  const socks = service ? parseProxyState(await commandOutput($, ['networksetup', '-getsocksfirewallproxy', service])) : null
+  const route = /interface:\s*(\S+)/.exec(await commandOutput($, ['route', '-n', 'get', 'default']))?.[1] ?? ''
+  const processes = (await commandOutput($, ['ps', '-axo', 'comm='])).split('\n').map(line => line.trim())
   const otherProxies = [...new Set(OTHER_PROXIES.filter(([pattern]) => processes.some(name => pattern.test(name))).map(([, name]) => name))]
   let portHolder: string | null = null
   let oldProxyPid: number | null = null
   if (status.phase === 'failed' && /port-busy|EADDRINUSE|in use/i.test(status.error ?? '')) {
-    const lsof = await run($, ['lsof', '-nP', `-iTCP:${status.port}`, '-sTCP:LISTEN', '-Fcp'])
+    const lsof = await commandOutput($, ['lsof', '-nP', `-iTCP:${status.port}`, '-sTCP:LISTEN', '-Fcp'])
     const command = /^c(.+)$/m.exec(lsof)?.[1]
     const pid = /^p(\d+)$/m.exec(lsof)?.[1]
     portHolder = command ? `${command}${pid ? ` (pid ${pid})` : ''}` : null
     // a proxy of Wirepane 0.7 (each session its own, no --daemon) still running beside an updated plugin
-    const args = pid ? await run($, ['ps', '-o', 'args=', '-p', pid]) : ''
+    const args = pid ? await commandOutput($, ['ps', '-o', 'args=', '-p', pid]) : ''
     if (pid && /sidecar\/proxy\.mjs/.test(args) && !/--daemon/.test(args)) oldProxyPid = Number(pid)
   }
   return {
@@ -2628,22 +2642,22 @@ async function appendOption($: EngineInterface, name: 'insecureHosts' | 'noDecry
 /** Sets one plugin option. Each key is fixed text, so it cannot be read as Claude's permission mode. */
 async function setOption($: EngineInterface, name: 'insecureHosts' | 'noDecrypt' | 'upstreamProxy', value: string, done = 'Set; the proxy restarts with it.'): Promise<void> {
   if (name === 'insecureHosts') {
-    const result = await $.config.set({ key: 'wirepane.insecureHosts', value })
+    const result = await $.config.set({ key: 'wirepane.insecureHosts', value: value })
     await say($, 'deny' in result && result.deny ? `Could not change the setting: ${result.deny}` : done)
     return
   }
   if (name === 'noDecrypt') {
-    const result = await $.config.set({ key: 'wirepane.noDecrypt', value })
+    const result = await $.config.set({ key: 'wirepane.noDecrypt', value: value })
     await say($, 'deny' in result && result.deny ? `Could not change the setting: ${result.deny}` : done)
     return
   }
-  const result = await $.config.set({ key: 'wirepane.upstreamProxy', value })
+  const result = await $.config.set({ key: 'wirepane.upstreamProxy', value: value })
   await say($, 'deny' in result && result.deny ? `Could not change the setting: ${result.deny}` : done)
 }
 
 /** Listen on LAN. The engine reloads the mod with the new option, and the proxy restarts on it. */
 async function setListen($: EngineInterface, value: 'lan' | 'local'): Promise<void> {
-  const result = await $.config.set({ key: 'wirepane.listen', value })
+  const result = await $.config.set({ key: 'wirepane.listen', value: value })
   await say($, 'deny' in result && result.deny ? `Could not change Proxy reachable from: ${result.deny}` : value === 'lan' ? 'Listening on the network now.' : 'Listening on this Mac only now.')
 }
 
@@ -3139,7 +3153,7 @@ async function control($: EngineInterface, command: string, body: Record<string,
 
 async function chooseLayout($: EngineInterface, layout: 'list' | 'tree'): Promise<void> {
   await update($, viewAtom, (v): ProxyView => ({ ...v, mode: v?.mode === 'detail' ? 'list' : (v?.mode ?? 'list'), layout }))
-  await $.store.set('layout', layout).catch(() => undefined)
+  await orCatch($.store.set('layout', layout), () => undefined)
 }
 
 async function openPane($: EngineInterface): Promise<void> {
@@ -3401,7 +3415,7 @@ export const register: Register = (on, raw) => {
       await update($, versionAtom, () => manifest.version ?? '')
     } catch {}
     await loadRules($).catch(() => undefined)
-    const remembered = await $.store.get('layout').catch(() => undefined)
+    const remembered = await orCatch($.store.get('layout'), () => undefined)
     if (remembered === 'tree' || remembered === 'list') {
       await update($, viewAtom, (v): ProxyView => ({ ...v, layout: remembered }))
     }
@@ -3555,15 +3569,15 @@ export const register: Register = (on, raw) => {
       const from = rules.findIndex(rule => rule.id === id)
       if (from < 0) return `No rule has the id ${id}.`
       const changes = (e.changes ?? {}) as Partial<Rule>
-      const next: Rule = { ...rules[from]!, ...changes }
-      if (typeof e.enabled === 'boolean') next.enabled = e.enabled
-      problems = ruleErrors(next)
+      const updated: Rule = { ...rules[from]!, ...changes }
+      if (typeof e.enabled === 'boolean') updated.enabled = e.enabled
+      problems = ruleErrors(updated)
       if (problems.length) return 'invalid'
-      if (next.id !== id && rules.some(rule => rule.id === next.id)) return `A rule with the id ${next.id} exists.`
+      if (updated.id !== id && rules.some(rule => rule.id === updated.id)) return `A rule with the id ${updated.id} exists.`
       rules.splice(from, 1)
       const to = typeof e.position === 'number' ? Math.max(0, Math.min(rules.length, Math.floor(e.position) - 1)) : from
-      rules.splice(to, 0, next)
-      changed = next
+      rules.splice(to, 0, updated)
+      changed = updated
       return rules
     })
     if (failure === 'invalid') return { result: `Not changed:\n${problems.join('\n')}` }

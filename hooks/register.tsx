@@ -193,6 +193,8 @@ type Runtime = {
   checkedAt: number
 }
 
+type ProxyInfo = NonNullable<ProxyHealth['process']>
+
 // The running sidecar of this load of the module; a reload kills the child
 // with the module, and session.start starts another while `wanted` holds.
 let runtime: Runtime | null = null
@@ -2550,32 +2552,29 @@ async function doctorFacts($: EngineInterface, options: Options): Promise<Doctor
   }
 }
 
-type ProxyInfo = NonNullable<ProxyHealth['process']>
-
-async function readProxyInfo($: EngineInterface): Promise<ProxyInfo | null> {
-  const answer = await control($, 'info', {})
-  const info = answer as ControlAnswer & Partial<ProxyInfo> & { memory?: { rss: number } }
-  if (info.error || info.pid === undefined) return null
-  return {
-    pid: info.pid,
-    version: info.version ?? '',
-    uptimeMs: info.uptimeMs ?? 0,
-    rss: info.memory?.rss ?? 0,
-    flows: info.flows ?? 0,
-    diskBytes: info.diskBytes ?? 0,
-    sessions: info.sessions ?? [],
-    websockets: info.websockets ?? 0,
-    pinned: info.pinned ?? 0,
-    isShared: info.isShared ?? false,
-  }
-}
-
 /** Looks again, keeps the findings for the Health view, and answers them. */
 async function runDoctor($: EngineInterface, options: Options): Promise<ProxyHealth> {
-  const findings = diagnose(await doctorFacts($, options))
+  const facts = await doctorFacts($, options)
+  const findings = diagnose(facts)
   const checkedAt = await $.clock.now()
-  const info = await readProxyInfo($)
-  const health: ProxyHealth = { checkedAt, findings, process: info }
+  const answer = await control($, 'info', {})
+  const info = answer as ControlAnswer & Partial<ProxyInfo> & { memory?: { rss: number } }
+  let proxy: ProxyInfo | null = null
+  if (!info.error && info.pid !== undefined) {
+    proxy = {
+      pid: info.pid,
+      version: info.version ?? '',
+      uptimeMs: info.uptimeMs ?? 0,
+      rss: info.memory?.rss ?? 0,
+      flows: info.flows ?? 0,
+      diskBytes: info.diskBytes ?? 0,
+      sessions: info.sessions ?? [],
+      websockets: info.websockets ?? 0,
+      pinned: info.pinned ?? 0,
+      isShared: info.isShared ?? false,
+    }
+  }
+  const health: ProxyHealth = { checkedAt, findings, process: proxy }
   await update($, healthAtom, () => health)
   return health
 }

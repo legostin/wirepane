@@ -16,7 +16,7 @@ So instead of copying requests into the chat, you ask:
 
 Claude finds the request, reads only the part it needs, compares the one that works with the one that fails, replays it with a change, writes a rule, and fixes your code. When something is in the way, a missing CA, a pinned certificate, a VPN or Charles holding the system proxy, the doctor names it and fixes it.
 
-[Website](https://legostin.github.io/wirepane/) · [Install](#install) · [What Claude can do](#tools-for-claude) · [Doctor](#the-doctor) · [Rules](#rules) · [Limits](#limits) · [Design notes](docs/design.md)
+[Website](https://legostin.github.io/wirepane/) · [Install](#install) · [What Claude can do](#tools-for-claude) · [Doctor](#the-doctor) · [Rules](#rules) · [Limits](#limits) · [Design notes](docs/design.md) · [Privacy](PRIVACY.md)
 
 ## Install
 

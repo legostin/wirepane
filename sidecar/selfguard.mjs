@@ -83,7 +83,7 @@ export function createSelfGuard({ port, addresses, emit, isAssumed = false }) {
   check()
   setInterval(check, 3000).unref()
 
-  const processTable = async () => {
+  const pidTable = async () => {
     if (!table || Date.now() - tableAt > 2000) {
       table = parseProcessTable(await run(['ps', '-A', '-o', 'pid=,ppid=,args=']))
       tableAt = Date.now()
@@ -104,7 +104,7 @@ export function createSelfGuard({ port, addresses, emit, isAssumed = false }) {
       if (remote !== '127.0.0.1' && remote !== '::1') return false
       const pid = clientPidFromLsof(await run(['lsof', '-nP', `-iTCP:${socket.remotePort}`, '-Fpn'], 1500), socket.remotePort)
       if (!pid || pid === process.pid) return false
-      return descendsFromClaude(await processTable(), pid)
+      return descendsFromClaude(await pidTable(), pid)
     },
   }
 }

@@ -311,7 +311,7 @@ A mod runs sandboxed, with no sockets of its own, so the proxy is a small Node.j
 
 ## What it runs and what it changes
 
-Wirepane sends nothing of its own anywhere: no telemetry, no update checks, no downloads. It connects only to the servers the clients you point at it asked for. A request reaches Claude only when Claude calls a tool; what it reads then becomes part of the conversation, like a file Claude reads.
+Wirepane sends nothing of its own anywhere: no telemetry, no update checks. The proxy reads each request a client sends it (the URL, the headers and the body, which can include tokens and personal data from the app you are debugging) and forwards that request to the host in the URL. With an upstream proxy set, it sends the same request there instead, and that proxy connects onward. An upstream given as `pac+http(s)://…` is a PAC file: the proxy downloads it when a request first needs it, and again once its copy is ten minutes old, and runs its `FindProxyForURL` in a sandbox to pick the upstream for each request. Recordings stay on this Mac, in `~/.claude/proxy-mod`; a run's folder is deleted two days after its last use. A request reaches Claude only when Claude calls a tool; what it reads then becomes part of the conversation, like a file Claude reads.
 
 While the proxy is on, it runs:
 
@@ -320,6 +320,10 @@ While the proxy is on, it runs:
 - **The watchdog:** `node sidecar/watchdog.mjs`, which puts the system proxy back if the proxy is killed.
 - **`openssl`:** makes the CA and the host certificates.
 - **System tools:** `route`, `networksetup` and `scutil` find this Mac's addresses and read the system proxy. `ps` and `lsof` tell Claude's own connections apart. The doctor uses `ps`, `lsof` and `adb` too.
+- **`kill`, by pid:** on the proxy and on the session link when the proxy stops, a session leaves or a session links up again after a `/clear`, on a proxy of Wirepane 0.7 still holding the port when the proxy starts, and on the old proxy the doctor's **Stop it and start** names.
+- **`curl` to this Mac only:** if a proxy that did not shut down left the system proxy on, Wirepane asks `curl` whether `http://127.0.0.1:<that port>/` still answers (no proxy, two seconds) before putting the old settings back. The control socket the tools use is the same kind of call, to `http://127.0.0.1:<port>/` on this machine. `replay_request` sends a recorded request again with `curl` through the proxy on `127.0.0.1`, which forwards it to its host like any other request.
+- **`/bin/sh -c`, for an emulator:** **Android → Start through the proxy** starts `emulator` with `nohup`, so it keeps running after the press, then waits for it to boot with `adb`, `seq`, `awk`, `head`, `tr` and `sleep`. The port and the emulator name are this Mac's.
+- **`osascript`, when macOS asks for an administrator:** the `networksetup` commands that turn the system proxy on or put it back run again through `osascript … with administrator privileges` when macOS refuses them without one, and macOS shows its password dialog. That can happen on **Turn on for this Mac**, **Turn off** and **iOS → Use**, when the proxy stops, on the doctor's **Put back**, and when a session starts and finds the system proxy left on by a proxy that did not shut down.
 
 Only when you press the button for it:
 
@@ -331,7 +335,7 @@ Only when you press the button for it:
 | **Browser → Open** | `open -na <browser>` with a profile of its own | Nothing outside `~/.claude/proxy-mod/browser` |
 | **Android → Start through the proxy**, **Android → proxy**, **Point USB phones** | `emulator -http-proxy`, `adb shell settings put global http_proxy`, `adb reverse` | The device's proxy, put back by **Revert** and when the proxy stops |
 | **Health → Trust in all apps** (Android) | `adb root`, `adb push`, a shell script that mounts a tmpfs over the system CA store | The emulator's system CAs, until it reboots |
-| **Health → Accept its certificate**, **Never decrypt it** | Nothing | The plugin option, which restarts the proxy |
+| **Listen on LAN**, **Health → Accept its certificate**, **Never decrypt it**, **Use it upstream** | Nothing | This plugin's own settings, `wirepane.listen`, `wirepane.insecureHosts`, `wirepane.noDecrypt` and `wirepane.upstreamProxy`. The proxy restarts with them. None of these is Claude's permission mode |
 | **Install Node.js**, shown when no Node was found | `brew install node` | Node.js from Homebrew |
 
 Files it writes:
@@ -340,8 +344,8 @@ Files it writes:
 - **`flows/<run>`:** the headers, bodies, WebSocket messages and events of recorded requests. They can hold the passwords, tokens and personal data of the apps you debug. A run's folder is deleted two days after its last use.
 - **`sidecar.json`, `sidecar.log`:** where the running proxy is, and its log.
 - **`tracking.json`, `trusted-scripts.json`:** the tracked domains, and the rule scripts you approved.
-- **`system-proxy-backup.json`, `android-proxied.json`:** what to put back.
-- **`<project>/.claude/proxy-rules.json`:** written once you or Claude add a rule.
+- **`system-proxy-backup.json`, `android-proxied.json`:** what to put back. The proxy process reads these and obeys them: it restores the system proxy and points the listed Android devices back if its last session vanished.
+- **`<project>/.claude/proxy-rules.json`:** written once you or Claude add a rule. The proxy process reads it and applies those rules.
 
 All of these live in `~/.claude/proxy-mod` except the rules file, which lives in your project.
 

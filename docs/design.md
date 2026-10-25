@@ -359,8 +359,10 @@ tail of its stderr in the pane, [Start] again), the upstream is unreachable
 - **The phone section** always shows the QR code once an address is known,
   and says Listen on LAN comes first while the proxy listens locally. It
   confirms traffic from each network client and counts the times a client
-  refused the certificate. Listen on LAN finds its `/config` row through
-  `$.config.list()` rather than assuming its key.
+  refused the certificate. Listen on LAN writes the plugin setting
+  `wirepane.listen`. With another plugin named wirepane on, `/config` names
+  both copies' rows by their ids and has no `wirepane.listen`: the button
+  says so and points to `/config`.
 - **Android emulators** started from the tab are found by AVD name once up,
   waited for (`sys.boot_completed`) and shown the CA page in their browser.
 - **Version.** The pane, the setup footer and `/proxy status` name the mod's

@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1d2129"/><stop offset="1" stop-color="#0f1115"/></linearGradient>
+  </defs>
+  <rect width="1024" height="1024" rx="224" fill="url(#bg)"/>
+  <rect x="8" y="8" width="1008" height="1008" rx="216" fill="none" stroke="#323844" stroke-width="16"/>
+  <rect x="128" y="200" width="768" height="624" rx="80" fill="#161920" stroke="#4a505b" stroke-width="32"/>
+  <path d="M384 216 V808" stroke="#4a505b" stroke-width="32"/>
+  <!-- chat pane: Claude -->
+  <rect x="200" y="312" width="120" height="80" rx="40" fill="#e08a68"/>
+  <rect x="200" y="472" width="80" height="80" rx="40" fill="#9a958c"/>
+  <rect x="200" y="632" width="120" height="80" rx="40" fill="#e08a68"/>
+  <!-- traffic pane -->
+  <circle cx="488" cy="352" r="44" fill="#e3b341"/><rect x="568" y="312" width="256" height="80" rx="40" fill="#ece9e3"/>
+  <circle cx="488" cy="512" r="44" fill="#f2766b"/><rect x="568" y="472" width="192" height="80" rx="40" fill="#ece9e3"/>
+  <circle cx="488" cy="672" r="44" fill="#6cc690"/><rect x="568" y="632" width="232" height="80" rx="40" fill="#ece9e3"/>
+</svg>

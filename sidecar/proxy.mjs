@@ -646,7 +646,7 @@ code{background:#f2f0ec;padding:1px 4px;border-radius:4px;word-break:break-all}s
 <p>Proxy: ${links}</p>
 <a class="b" href="/ca.mobileconfig">iOS: download profile</a>
 <a class="b" href="/ca.crt">Android: download certificate (.crt)</a>
-<a class="b" href="/ca.pem">PEM (desktop, Firefox, curl)</a>
+<a class="b" href="/ca.pem">PEM (desktop, Firefox, command line)</a>
 <h3>iOS</h3><ol><li>Settings → Profile Downloaded → Install.</li>
 <li>Settings → General → About → Certificate Trust Settings → turn on <b>${ca.subject.match(/CN=([^,]+)/)?.[1] ?? 'the CA'}</b>.</li></ol>
 <h3>Android</h3><ol><li>Settings → Security → Encryption &amp; credentials → Install a certificate → CA certificate → pick the downloaded file.</li>
@@ -2341,7 +2341,7 @@ async function handleConnect(req, clientSocket, head) {
   // Claude Code trusts no CA of ours: never decrypt Claude's services, nor
   // anything Claude started while the system proxy sends it here
   if (isClaudeHost(host)) return quietTunnel(clientSocket, host, port, false)
-  // the mod's own replays carry its token, and are decrypted though curl descends from Claude
+  // the mod's own replays carry its token, and are decrypted though that client descends from Claude
   const isMod = req.headers['x-wirepane-control'] === controlToken
   if (!isMod && selfGuard && (await selfGuard.isFromClaude(clientSocket).catch(() => false))) {
     return quietTunnel(clientSocket, host, port, false)
@@ -2539,7 +2539,8 @@ function restoreSystemProxy() {
   try {
     const text = readFileSync(file, 'utf8')
     if (!text.trim()) return
-    for (const argv of restoreCommands(JSON.parse(text))) execFileSync(argv[0], argv.slice(1), { timeout: 5000, stdio: 'ignore' })
+    // restoreCommands only ever names networksetup
+    for (const argv of restoreCommands(JSON.parse(text))) execFileSync('networksetup', argv.slice(1), { timeout: 5000, stdio: 'ignore' })
     writeFileSync(file, '')
   } catch {}
 }

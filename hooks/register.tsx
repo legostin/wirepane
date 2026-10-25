@@ -2553,28 +2553,37 @@ async function doctorFacts($: EngineInterface, options: Options): Promise<Doctor
 type ProcessInfo = NonNullable<ProxyHealth['process']>
 
 async function processInfo($: EngineInterface): Promise<ProcessInfo | null> {
-  const answer = (await control($, 'info', {})) as ControlAnswer & Partial<ProcessInfo> & { memory?: { rss: number } }
-  if (answer.error || answer.pid === undefined) return null
+  const answer = await control($, 'info', {})
+  const info = answer as ControlAnswer & Partial<ProcessInfo> & { memory?: { rss: number } }
+  if (info.error || info.pid === undefined) return null
   return {
-    pid: answer.pid,
-    version: answer.version ?? '',
-    uptimeMs: answer.uptimeMs ?? 0,
-    rss: answer.memory?.rss ?? 0,
-    flows: answer.flows ?? 0,
-    diskBytes: answer.diskBytes ?? 0,
-    sessions: answer.sessions ?? [],
-    websockets: answer.websockets ?? 0,
-    pinned: answer.pinned ?? 0,
-    isShared: answer.isShared ?? false,
+    pid: info.pid,
+    version: info.version ?? '',
+    uptimeMs: info.uptimeMs ?? 0,
+    rss: info.memory?.rss ?? 0,
+    flows: info.flows ?? 0,
+    diskBytes: info.diskBytes ?? 0,
+    sessions: info.sessions ?? [],
+    websockets: info.websockets ?? 0,
+    pinned: info.pinned ?? 0,
+    isShared: info.isShared ?? false,
   }
 }
 
 /** Looks again, keeps the findings for the Health view, and answers them. */
 async function runDoctor($: EngineInterface, options: Options): Promise<ProxyHealth> {
   const findings = diagnose(await doctorFacts($, options))
-  const health: ProxyHealth = { checkedAt: await $.clock.now(), findings, process: await processInfo($) }
+  const checkedAt = await $.clock.now()
+  const info = await processInfo($)
+  const health: ProxyHealth = { checkedAt, findings, process: info }
   await update($, healthAtom, () => health)
   return health
+}
+
+/** Drops the hosts the proxy passed through, then looks again. */
+async function clearPinned($: EngineInterface, options: Options): Promise<void> {
+  await control($, 'pinned/clear', {})
+  await runDoctor($, options)
 }
 
 function duration(ms: number): string {
@@ -2707,7 +2716,7 @@ async function drawHealth($: EngineInterface, e: PaneEvent, options: Options): P
         <Button key="health-check" hotkey="g" label="Check again" onPress={() => void runDoctor($, options)} />
         {status.phase === 'running' ? <Button key="proxy-restart" label="Restart proxy" onPress={() => void restart()} /> : null}
         {health.process?.pinned ? (
-          <Button key="pinned-retry" label={`Decrypt the ${health.process.pinned} passed-through hosts again`} onPress={() => void control($, 'pinned/clear', {}).then(() => runDoctor($, options))} />
+          <Button key="pinned-retry" label={`Decrypt the ${health.process.pinned} passed-through hosts again`} onPress={() => void clearPinned($, options)} />
         ) : null}
       </Box>
       <Text bold>Health{health.checkedAt ? ` · checked ${new Date(health.checkedAt).toLocaleTimeString()}` : ''}</Text>
@@ -2740,7 +2749,8 @@ type ResumeAnswer = ControlAnswer & { held?: number[] }
 
 /** Lets a held exchange go: as it was, changed, answered by hand, or cut. */
 async function resumeHeld($: EngineInterface, id: number, body: Record<string, unknown>): Promise<ResumeAnswer> {
-  return (await control($, 'held/resume', { id, ...body })) as ResumeAnswer
+  const answer = await control($, 'held/resume', { id, ...body })
+  return answer as ResumeAnswer
 }
 
 async function drawHeld($: EngineInterface, e: PaneEvent): Promise<RenderElement> {
@@ -3130,7 +3140,8 @@ async function exportHar($: EngineInterface, filter: string, file?: string): Pro
     exchanges.push({ ...exchange, ...(messages ? { messages } : {}) })
   }
   const root = await $.session.root()
-  const stamp = new Date(await $.clock.now()).toISOString().replace(/[:.]/g, '-').slice(0, 19)
+  const now = await $.clock.now()
+  const stamp = new Date(now).toISOString().replace(/[:.]/g, '-').slice(0, 19)
   const path = file ? (file.startsWith('/') ? file : `${root}/${file}`) : `${root}/.claude/wirepane-${stamp}.har`
   await $.fs.write(path, `${JSON.stringify(toHar(exchanges, await read($, versionAtom)), null, 2)}\n`)
   return `Wrote ${exchanges.length} requests to ${path} (HAR 1.2: Chrome DevTools, Charles, Proxyman and HTTP Toolkit open it).`
@@ -3541,7 +3552,10 @@ export const register: Register = (on, raw) => {
     return { result: lines.join('\n') }
   }).catch(() => ({ deny: 'proxy: could not change the tracked domains; try again.' }))
 
-  on('tool.call', { tool: 'mcp__wirepane__list_rules' }, async $ => ({ result: await rulesText($) })).catch(() => ({
+  on('tool.call', { tool: 'mcp__wirepane__list_rules' }, async $ => {
+    const text = await rulesText($)
+    return { result: text }
+  }).catch(() => ({
     deny: 'proxy: could not read the rules file; try again.',
   }))
 
@@ -3686,11 +3700,13 @@ export const register: Register = (on, raw) => {
     const parsed = parseFilter(filter)
     const isWanted = (flow: ProxyFlow) => flow.id > baseline && (until === 'start' || flow.state === 'done' || flow.state === 'error') && matchesFilter(flow, parsed)
     const answer = (flow: ProxyFlow) => ({ result: `${flowTable([flow])}\nget_request({ id: ${flow.id} }) shows it in full.` })
-    const deadline = (await $.clock.now()) + seconds * 1000
+    const started = await $.clock.now()
+    const deadline = started + seconds * 1000
     for (;;) {
       const already = (await read($, flowsAtom)).find(isWanted)
       if (already) return answer(already)
-      const left = deadline - (await $.clock.now())
+      const now = await $.clock.now()
+      const left = deadline - now
       if (left <= 0) break
       const waited = await control($, 'flows/wait', { after: baseline, until, timeoutMs: Math.min(5000, left) })
       if (waited.error) return { result: `Cannot wait: ${waited.error}.` }
@@ -3725,7 +3741,9 @@ export const register: Register = (on, raw) => {
     if (url !== detail.url) changes.push('URL')
     let bodyFile = detail.req?.file ?? null
     if (e.json !== undefined || typeof e.body === 'string') {
-      bodyFile = `${status.runDir ?? `${await dataDirOf($)}/flows/${await $.session.id()}`}/${id}.replay-${await $.clock.now()}.body`
+      const now = await $.clock.now()
+      const session = await $.session.id()
+      bodyFile = `${status.runDir ?? `${await dataDirOf($)}/flows/${session}`}/${id}.replay-${now}.body`
       await $.fs.write(bodyFile, e.json !== undefined ? JSON.stringify(e.json) : String(e.body))
       changes.push('body')
     }
@@ -3745,7 +3763,10 @@ export const register: Register = (on, raw) => {
     )
     const isReplay = (flow: ProxyFlow) => flow.replayOf === id && flow.id > before && (flow.state === 'done' || flow.state === 'error')
     let replayed = (await read($, flowsAtom)).find(isReplay)
-    if (!replayed) replayed = ((await control($, 'flows/wait', { after: before, timeoutMs: 5000 })).flows ?? []).find(isReplay)
+    if (!replayed) {
+      const waited = await control($, 'flows/wait', { after: before, timeoutMs: 5000 })
+      replayed = (waited.flows ?? []).find(isReplay)
+    }
     if (!replayed) return { result: `Sent #${id} again, but the proxy recorded no replay${run.stderr.trim() ? `: ${run.stderr.trim()}` : ''}.` }
     const shown = await describeRequest($, replayed.id, { part: 'response', budget: 3000, limit: 20 })
     return {
